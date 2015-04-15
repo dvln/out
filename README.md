@@ -33,11 +33,11 @@ Simply run calls to the output functions:
  * out.Trace\[f|ln\](...)  
  * out.Debug\[f|ln\](...)
  * out.Verbose\[f|ln\](...)
- * out.Print\[f|ln\](...) || out.Info\[f|ln\](...)       (same)
+ * out.Print\[f|ln\](...) or out.Info\[f|ln\](...)               (both the same)
  * out.Note\[f|ln\](...)
- * out.Issue\[f|ln\](...)
- * out.Error\[f|ln\](...)
- * out.Fatal\[f|ln\](...)
+ * out.Issue\[f|ln\](...) or out.IssueExit\[f|ln\](exitVal, ...) (2nd form exits)
+ * out.Error\[f|ln\](...) or out.ErrorExit\[f|ln\](exitVal, ...) (2nd form exits)
+ * out.Fatal\[f|ln\](...)                                        (always exits)
 
 Each of these map to two io.Writers, one for the screen and one for the
 log file (default is to discard log file output until it is configured,

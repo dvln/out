@@ -337,7 +337,6 @@ func Writer(level Level, forWhat int) io.Writer {
 // FIXME: a bitmap would be more flexible than current levels
 func SetWriter(level Level, w io.Writer, forWhat int) {
 	for _, o := range outputters {
-		//eriknow
 		if level == LevelAll || o.level == level {
 			o.mu.Lock()
 			defer o.mu.Unlock()
@@ -461,17 +460,39 @@ func Note(v ...interface{}) {
 }
 
 // Issue is meant for "normal" user error output, space separated opts
-// printed with no newline added, "Error: <msg>" prefix added by default
+// printed with no newline added, "Issue: <msg>" prefix added by default,
+// if you want to exit after the issue is reported see IssueExit()
 func Issue(v ...interface{}) {
 	issue.output(v...)
 }
 
+// IssueExit is meant for "normal" user error output, space separated opts
+// printed with no newline added, "Issue: <msg>" prefix added by default,
+// the "exit" form of this output routine results in os.Exit() being
+// called with the given exitVal (see Issue() if you do not want to exit)
+func IssueExit(exitVal int, v ...interface{}) {
+	issue.output(v...)
+	issue.exit(exitVal)
+}
+
 // Error is meant for "unexpected"/system error output, space separated
-// opts printed with no newline added, "ERROR: <msg>" prefix added by default
+// opts printed with no newline added, "ERROR: <msg>" prefix added by default,
+// if you want to exit after erroring see ErrorExit()
 // Note: by "unexpected" these are things like filesystem permissions
-// problems, see Note/Issue for more normal user level usage issues
+// problems, see Issue for more normal user level usage issues
 func Error(v ...interface{}) {
 	err.output(v...)
+}
+
+// ErrorExit is meant for "unexpected"/system error output, space separated
+// opts printed with no newline added, "ERROR: <msg>" prefix added by default,
+// the "exit" form of this output routine results in os.Exit() being called
+// with given exitVal (see Error() if you don't want to exit)
+// Note: by "unexpected" these are things like filesystem permissions
+// problems, see Issue for more normal user level usage issues
+func ErrorExit(exitVal int, v ...interface{}) {
+	err.output(v...)
+	err.exit(exitVal)
 }
 
 // Fatal is meant for "unexpected"/system fatal error output, space separated
@@ -526,23 +547,48 @@ func Noteln(v ...interface{}) {
 }
 
 // Issueln is meant for "normal" user error output, space separated
-// opts printed with no newline added, "Issue: <msg>" prefix added by default
+// opts printed with a newline added, "Issue: <msg>" prefix added by default
 // Note: by "normal" these are things like unknown codebase name given, etc...
-// for unexpected errors use Errorln (eg: file system full, etc)
+// for unexpected errors use Errorln (eg: file system full, etc).  If you wish
+// to exit after your issue is printed please use IssueExitln() instead.
 func Issueln(v ...interface{}) {
 	issue.outputln(v...)
 }
 
+// IssueExitln is meant for "normal" user error output, space separated opts
+// printed with a newline added, "Issue: <msg>" prefix added by default,
+// the "exit" form of this output routine results in os.Exit() being called
+// with the given exitVal.  See Issueln() if you do not want to exit.  This
+// routine honors PKG_OUT_NONZERO_EXIT_STACKTRACE env as well as the package
+// stacktrace setting via SetStacktraceOnExit(true), only if non-zero exitVal.
+func IssueExitln(exitVal int, v ...interface{}) {
+	issue.outputln(v...)
+	issue.exit(exitVal)
+}
+
 // Errorln is meant for "unexpected"/system error output, space separated
-// opts printed with no newline added, "ERROR: <msg>" prefix added by default
+// opts printed with a newline added, "ERROR: <msg>" prefix added by default
 // Note: by "unexpected" these are things like filesystem permissions problems,
 // see Noteln/Issueln for more normal user level notes/usage
 func Errorln(v ...interface{}) {
 	err.outputln(v...)
 }
 
+// ErrorExitln is meant for "unexpected"/system error output, space separated
+// opts printed with a newline added, "ERROR: <msg>" prefix added by default,
+// the "exit" form of this output routine results in os.Exit() being called
+// with given exitVal.  If you don't want to exit use Errorln() instead.  This
+// routine honors PKG_OUT_NONZERO_EXIT_STACKTRACE env as well as the package
+// stacktrace setting via SetStacktraceOnExit(true), only if non-Zero exit val.
+// Note: by "unexpected" these are things like filesystem permissions
+// problems, see IssueExitln() for more normal user level usage issues
+func ErrorExitln(exitVal int, v ...interface{}) {
+	err.outputln(v...)
+	err.exit(exitVal)
+}
+
 // Fatalln is meant for "unexpected"/system fatal error output, space separated
-// opts printed with no newline added, "FATAL: <msg>" prefix added by default
+// opts printed with a newline added, "FATAL: <msg>" prefix added by default
 // and the tool will exit non-zero here.  Note that a stacktrace can be added
 // for fatal errors, see PKG_OUT_NONZERO_EXIT_STACKTRACE
 func Fatalln(v ...interface{}) {
@@ -591,9 +637,19 @@ func Notef(format string, v ...interface{}) {
 }
 
 // Issuef is meant for "normal" user error output, format string followed
-// by args, prefix "Issue: <msg>" added by default
+// by args, prefix "Issue: <msg>" added by default.  If you want to exit
+// after your issue see IssueExitf() instead.
 func Issuef(format string, v ...interface{}) {
 	issue.outputf(format, v...)
+}
+
+// IssueExitf is meant for "normal" user error output, format string followed
+// by args, prefix "Issue: <msg>" added by default, the "exit" form of this
+// output routine results in os.Exit() being called with the given exitVal.
+// If you do not want to exit then see Issuef() instead
+func IssueExitf(exitVal int, format string, v ...interface{}) {
+	issue.outputf(format, v...)
+	issue.exit(exitVal)
 }
 
 // Errorf is meant for "unexpected"/system error output, format string
@@ -602,6 +658,14 @@ func Issuef(format string, v ...interface{}) {
 // see Notef/Issuef for more normal user level notes/usage
 func Errorf(format string, v ...interface{}) {
 	err.outputf(format, v...)
+}
+
+// ErrorExitf is meant for "unexpected"/system error output, format string
+// followed by args, prefix "ERROR: <msg>" added by default, the "exit" form
+// of this output routine results in os.Exit() being called with given exitVal
+func ErrorExitf(exitVal int, format string, v ...interface{}) {
+	err.outputf(format, v...)
+	err.exit(exitVal)
 }
 
 // Fatalf is meant for "unexpected"/system fatal error output, format string
@@ -620,9 +684,9 @@ func SetStacktraceOnExit(val bool) {
 
 // getStackTrace will get a stack trace (truncated at 4096 bytes currently)
 // if and only if PKG_OUT_NONZERO_EXIT_STACKTRACE is set to "1"
-func getStackTrace() string {
+func getStackTrace(exitVal int) string {
 	var myStack string
-	if stacktraceOnExit || os.Getenv("PKG_OUT_NONZERO_EXIT_STACKTRACE") == "1" {
+	if exitVal != 0 && (stacktraceOnExit || os.Getenv("PKG_OUT_NONZERO_EXIT_STACKTRACE") == "1") {
 		trace := make([]byte, 4096)
 		count := runtime.Stack(trace, true)
 		// trace will be populated with NUL chars for anything not filled in,
@@ -692,6 +756,26 @@ func (o *outputter) outputf(format string, v ...interface{}) {
 	msg := fmt.Sprintf(format, v...)
 	// dump it based on screen and log output levels
 	o.stringOutput(msg)
+}
+
+// exit will use os.Exit() to bail with the given exitVal, if
+// that exitVal is non-zero and a stracktrace is set up it will
+// dump that stacktrace as well (honoring all log levels and such),
+// see getStackTrace() for the env and package settings honored.
+func (o *outputter) exit(exitVal int) {
+	// get the stacktrace if it's configured
+	stacktrace := getStackTrace(exitVal)
+	if stacktrace != "" && o.level >= screenThreshold && o.level != LevelDiscard {
+		_, err := o.screenHndl.Write([]byte(o.doPrefixing(stacktrace, ForScreen, smartInsert)))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%sError writing stacktrace to screen output handle:\n%+v\n", o.prefix, err)
+			os.Exit(1)
+		}
+	}
+	if stacktrace != "" && o.level >= logThreshold && o.level != LevelDiscard {
+		o.logfileHndl.Write([]byte(o.doPrefixing(stacktrace, ForLogfile, smartInsert)))
+	}
+	os.Exit(exitVal)
 }
 
 // iota converts an int to fixed-width decimal ASCII.  Give a negative width to
@@ -888,7 +972,7 @@ func (o *outputter) stringOutput(s string) {
 	// print to the screen output writer first
 	var stacktrace string
 	if o.level == LevelFatal {
-		stacktrace = getStackTrace()
+		stacktrace = getStackTrace(1)
 	}
 	if o.level >= screenThreshold && o.level != LevelDiscard {
 		pfxScreenStr := o.doPrefixing(s, ForScreen, smartInsert)
