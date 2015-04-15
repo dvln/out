@@ -51,8 +51,8 @@ func TestOutput(t *testing.T) {
 	screenBuf := new(bytes.Buffer)
 	logBuf := new(bytes.Buffer)
 
-	SetWriter(screenBuf, ForScreen)
-	SetWriter(logBuf, ForLogfile)
+	SetWriter(LevelAll, screenBuf, ForScreen)
+	SetWriter(LevelAll, logBuf, ForLogfile)
 
 	SetThreshold(LevelInfo, ForScreen)
 	SetThreshold(LevelNote, ForLogfile)
@@ -91,8 +91,8 @@ func TestOutputln(t *testing.T) {
 	screenBuf := new(bytes.Buffer)
 	logBuf := new(bytes.Buffer)
 
-	SetWriter(screenBuf, ForScreen)
-	SetWriter(logBuf, ForLogfile)
+	SetWriter(LevelAll, screenBuf, ForScreen)
+	SetWriter(LevelAll, logBuf, ForLogfile)
 
 	SetThreshold(LevelVerbose, ForScreen)
 	SetThreshold(LevelNote, ForLogfile)
@@ -131,8 +131,8 @@ func TestOutputf(t *testing.T) {
 	screenBuf := new(bytes.Buffer)
 	logBuf := new(bytes.Buffer)
 
-	SetWriter(screenBuf, ForScreen)
-	SetWriter(logBuf, ForLogfile)
+	SetWriter(LevelAll, screenBuf, ForScreen)
+	SetWriter(LevelAll, logBuf, ForLogfile)
 
 	SetThreshold(LevelTrace, ForScreen|ForLogfile)
 
@@ -181,8 +181,8 @@ func TestDiscard(t *testing.T) {
 	screenBuf := new(bytes.Buffer)
 	logBuf := new(bytes.Buffer)
 
-	SetWriter(screenBuf, ForScreen)
-	SetWriter(logBuf, ForLogfile)
+	SetWriter(LevelAll, screenBuf, ForScreen)
+	SetWriter(LevelAll, logBuf, ForLogfile)
 
 	// Turn everything off, see if that flies
 	SetThreshold(LevelDiscard, ForScreen|ForLogfile)
@@ -219,7 +219,7 @@ func TestDiscard(t *testing.T) {
 func TestTempFileOutput(t *testing.T) {
 	// lets capture screen output while mirroring to a log file
 	screenBuf := new(bytes.Buffer)
-	SetWriter(screenBuf, ForScreen)
+	SetWriter(LevelAll, screenBuf, ForScreen)
 	SetThreshold(LevelTrace, ForScreen)
 
 	// note that this auto-sets up the logfile io.Writer for all logging levels

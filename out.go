@@ -115,6 +115,7 @@ const (
 	LevelError                // Recoverable sys or unexpected error
 	LevelFatal                // Very bad, we need to exit non-zero
 	LevelDiscard              // Indicates no output at all if used
+	LevelAll                  // Used for a few API's to indicate set all levels
 	// (writer set to ioutil.Discard also works)
 	defaultScreenThreshold = LevelInfo    // Default out to regular info level
 	defaultLogThreshold    = LevelDiscard // Default file logging starts off
@@ -124,8 +125,9 @@ const (
 // stream or the logfile output stream, use these bitflags anywhere you see
 // forWhat arguments below.
 const (
-	ForScreen  = 1 << iota // Bit flag used to indicate screen target
-	ForLogfile             // Used to indicate logfile target desired
+	ForScreen  = 1 << iota              // Bit flag used to indicate screen target
+	ForLogfile                          // Used to indicate logfile target desired
+	ForBoth    = ForScreen | ForLogfile // indicate both as targets
 )
 
 // These are primarily for inserting prefixes on printed strings so we can put
@@ -268,7 +270,6 @@ func Discard(forWhat int) {
 
 // Flags gets the screen or logfile output flags (Ldate, Ltime, .. above),
 // you must give one or the other (out.ForScreen or out.ForLogfile) only.
-// FIXME: should take optional bitmap to indicate levels to set, else all (?)
 func Flags(level Level, forWhat int) int {
 	level = levelCheck(level)
 	flags := 0
@@ -293,16 +294,21 @@ func Flags(level Level, forWhat int) int {
 // Note: Right now this sets *every* levels log flags to given value, and one
 // can give it out.ForScreen, out.ForLogfile or both or'd together although
 // usually one would want to give just one to adjust (screen or logfile)
-// FIXME: should take optional bitmap to indicate levels to set, else all (?)
-func SetFlags(flags int, forWhat int) {
+// FIXME: a bitmap would be more flexible than current levels
+func SetFlags(level Level, flags int, forWhat int) {
 	for _, o := range outputters {
 		o.mu.Lock()
 		defer o.mu.Unlock()
-		if forWhat&ForScreen != 0 {
-			o.screenFlags = flags
-		}
-		if forWhat&ForLogfile != 0 {
-			o.logFlags = flags
+		if level == LevelAll || o.level == level {
+			if forWhat&ForScreen != 0 {
+				o.screenFlags = flags
+			}
+			if forWhat&ForLogfile != 0 {
+				o.logFlags = flags
+			}
+			if level != LevelAll {
+				break
+			}
 		}
 	}
 }
@@ -328,16 +334,22 @@ func Writer(level Level, forWhat int) io.Writer {
 
 // SetWriter sets the screen and/or logfile output io.Writer for every log
 // level to the given writer
-// FIXME: should take optional bitmap to indicate levels to set, else all (?)
-func SetWriter(w io.Writer, forWhat int) {
+// FIXME: a bitmap would be more flexible than current levels
+func SetWriter(level Level, w io.Writer, forWhat int) {
 	for _, o := range outputters {
-		o.mu.Lock()
-		defer o.mu.Unlock()
-		if forWhat&ForScreen != 0 {
-			o.screenHndl = w
-		}
-		if forWhat&ForLogfile != 0 {
-			o.logfileHndl = w
+		//eriknow
+		if level == LevelAll || o.level == level {
+			o.mu.Lock()
+			defer o.mu.Unlock()
+			if forWhat&ForScreen != 0 {
+				o.screenHndl = w
+			}
+			if forWhat&ForLogfile != 0 {
+				o.logfileHndl = w
+			}
+			if level != LevelAll {
+				break
+			}
 		}
 	}
 }
