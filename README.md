@@ -127,7 +127,7 @@ a file log, as you'll see below, these are the two things to do:
 
 Lets see how to configure and use this package next.
 
-## Step 2. Optionally configure 'out' package
+## Optionally configure 'out' package
 
 To set up file logging or to adjust any of the defaults listed above
 follow these steps:
@@ -318,6 +318,18 @@ Another option: leave the screen alone and use the log file writer as a buffer:
 	out.SetWriter(logfileBuf, out.ForLogfile)
     ...
 ```
+
+## Environment settings
+Curently there's only a couple:
+
+ * PKG_OUT_NONZERO_EXIT_STACKTRACE env set to "1" causes stacktraces to kick in
+   for any non-zero exit done through this package (os.Exit() is not affected),
+   so basically if you use IssueExit... or ErrorExit... or Fatal... it works
+
+Meant for internal use (eg: for testing purposes):
+
+ * PKG_OUT_NO_EXIT env set to "1" causes bypass of os.Exit() in this package,
+   only applies to exits reached via the 'out' package
 
 # Current status
 This is a very early release... needs more work so use with caution (vendor it)
