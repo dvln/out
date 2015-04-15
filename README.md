@@ -76,8 +76,8 @@ see below).  Standard usage:
 ```
 
 There are 8 levels but you can use just those that your product needs
-of course.  Personally I like to have at least a --debug and --verbose
-set of options in my CLI's (with -d and -v short names) so that items
+of course.  Personally I like to have at least a "--debug" and "--verbose"
+set of options in my CLI's (with "-d" and "-v" short names) so that items
 like "-dv" can map to Trace level output, "-d" to Debug level output
 and "-v" to Verbose level output with none of these opts mapping to
 normal Print/Info level output.  Extend with "--terse" and "-t" and/or
@@ -88,46 +88,42 @@ wish of course.
 The default settings add prefixes for you on some of the messages, the
 defaults are:
 
-1. Trace level (stdout): "\<date/time\> Trace: message"
-2. Debug level (stdout): "\<date/time\> Debug: message"
-3. Verbose level (stdout): message
-4. *Default*: Info|Print level (stdout): "message"
-5. Note level (stdout): "Note: message"
-6. Issue level (stdout): "Issue: message"
-7. Error level (stderr): "ERROR: message"
-8. Fatal level (stderr), optional stacktrace: "FATAL: message""
+1. Trace level (stdout): "\<date/time\> Trace: \<message\>"
+2. Debug level (stdout): "\<date/time\> Debug: \<message\>"
+3. Verbose level (stdout): "\<message\>""
+4. *Default*: Info|Print level (stdout): "\<message\>"
+5. Note level (stdout): "Note: \<message\>"
+6. Issue level (stdout): "Issue: \<message\>"
+7. Error level (stderr): "ERROR: \<message\>"
+8. Fatal level (stderr), optional stacktrace: "FATAL: \<message\>"
 
-The level names can't be changed unless you tweak the code but
-everything else can be such as time/date or not, any prefix to
-be output to the screen or log file for a given level, what
-io.Writer is used for all levels or a specific level, etc,
-see API's below.
+The packages built-in names for these levels can't be changed (unless you tweak
+the code) but everything visible to the user can be such if you want the Issue
+level to instead print "Error: " in mixed case (instead of "Issue: ") as the
+prefix that can be done, if you want no prefix or if you want time/date info
+turned on that's also possible, if you want everything to go to stdout or if
+if you want to change the default threshold to verbose instead of Print/Info...
+all possible.  Adjustments via the API are covered below.
 
-If you don't like the markup/prefix or the screen output "default" 
-threshold that is all changable via the API.  If you do want to
-see trace or debug or verbose output then change the default screen
-output threshold (see below).  Until that is done anything "above"
-your logging level on this list will to to /dev/null effectively.
+For log files output keep in mind the default is ioutil.Discard for the
+io.Writer effectively meaning /dev/null to start with.  However, if you
+set a log file up (as below) the default log file output starts out 
+configured to behave like the below:
 
-For log files keep in mind the default is ioutil.Discard for the
-io.Writer effectively meaning /dev/null for output, but if you set
-a file logger up (as below) the default output looks like this (you
-must also tell it what the default level is when you set it up):
+1. Trace level: "\<date/time\> \<file/line#\> Trace: message"
+2. Debug level: "\<date/time\> \<file/line#\> Debug: message"
+3. Verbose level: "\<date/time\> \<file/line#\> message"
+4. Info|Print level: "\<date/time\> \<file/line#\> message"
+5. Note level: "\<date/time\> \<file/line#\> Note: message"
+6. Issue level: "\<date/time\> \<file/line#\> Issue: message"
+7. Error level: "\<date/time\> \<file/line#\> ERROR: message"
+8. Fatal level, optional stacktrace: "\<date/time file/line# FATAL: message"
 
-1. Trace level: "date/time file/line# Trace: message"
-2. Debug level: "date/time file/line# Debug: message"
-3. Verbose level: "date/time file/line# message"
-4. Info|Print level: "date/time file/line# message"
-5. Note level: "date/time file/line# Note: message"
-6. Issue level: "date/time file/line# Issue: message"
-7. Error level: "date/time file/line# ERROR: message"
-8. Fatal level, optional stacktrace: "date/time file/line# FATAL: message"
+Again, all of this is adjustable so check out the next section.  To activate
+a file log, as you'll see below, these are the two things to do:
 
-Again, all of this is adjustable, see the next section.  To activate
-a log you need to do two things:
-
-1. Use an API call to prepare a temp or named file (points io.Writer at it)
-2. Give the logging level for output you want to go into the log file
+1. Use an API call to prepare a temp or named file (points an io.Writer at it)
+2. Use an API call to set the logging level you want logged
 
 Lets see how to configure and use this package next.
 
@@ -136,10 +132,10 @@ Lets see how to configure and use this package next.
 To set up file logging or to adjust any of the defaults listed above
 follow these steps:
 
-### Using a temp log file, setting detailed output/logging thresholds
+### Send output to a temp log file, setting detailed output/logging thresholds
 
-Here we'll enable all available levels of output to both the screen and to
-the temp log file:
+Enable all available levels of output to both the screen and to the temp log
+file we just created (uses Go's temp file routines):
 
 ```go
     import (
@@ -161,14 +157,20 @@ the temp log file:
     ...
 ```
 
-After that all out package output functions (eg: out.Debugf or out.Println)
-will go to the screen io.Writer and to the log file io.Writer using the default
+After that all "out" package output functions (eg: out.Debugf or out.Println)
+will go to the screens io.Writer and to the log file io.Writer using the default
 settings (unless you have adjusted those yourself as below).
 
-### Adjust the screen verbosity so we see verbose output only
+### Adjust the screen verbosity so we see Verbose level output
 
-You should call this early in your application as only
-calls after it is done will use the set output level:
+Quick note: by Verbose level output it is meant that the Verbose level and all
+higher levels (higher numbers in the list above) will be shown, ie: Verbose,
+Print, Note, Issue, Error, Fatal.  If I set the level to Note then only Note,
+Issue, Error and Fatal messages would be displayed to that target.
+
+One should call any threshold setup (and log file setup and such) early in
+your tool as output will only start flowing at that level after you have set
+it up:
 
 ```go
     import (
@@ -236,7 +238,7 @@ for you after that 1st line and that just won't work (for me).  With this the
 above will come out:
 
 ```text
-Note: Successful test of: somesystem
+Note: Successful test of: <somesystem>
 Note: So I think you should
 Note: buy this system as it
 Note: is a quality system
@@ -245,10 +247,10 @@ Note: is a quality system
 If it was Debug instead of Note the output would be:
 
 ```text
-date/time Debug: Successful test of: somesystem
-date/time Debug: So I think you should
-date/time Debug: buy this system as it
-date/time Debug: is a quality system
+<date/time> Debug: Successful test of: <somesystem>
+<date/time> Debug: So I think you should
+<date/time> Debug: buy this system as it
+<date/time> Debug: is a quality system
 ```
 
 The log package would insert newlines after each entry so 'somesystem' would
@@ -318,12 +320,15 @@ Another option: leave the screen alone and use the log file writer as a buffer:
 ```
 
 # Current status
-This is a very early release... needs more work so use with caution (vendor)
+This is a very early release... needs more work so use with caution (vendor it)
 as it's likely to change a bit over the coming months.  Thanks again to spf13
 and the Go authors for some ideas here and definitely feel free to send in any
 issues.
 
+I've tried to use mutexes to protect the data similar to Go 'log' but that
+hasn't really been tested much.
+
 I wrote this for use in [dvln](http://github.com/dvln). Yeah, doesn't really
-exist as much yet but we shall see if I can change that.  It's targeted towards
-nested multi-pkg multi-scm development line and workspace management... what
-could go wrong?  ;)
+exist yet but we shall see if I can change that.  It's targeted towards nested
+multi-pkg multi-scm development line and workspace management... what could
+go wrong?  ;)
