@@ -21,17 +21,21 @@
 //
 // - Screen and logfile targets can be independently managed, eg: screen
 // gets normal output and errors, log gets full trace/debug output and is
-// augmented with timestamps, Go file/line# for all log entry types
+// augmented with timestamps, Go file/line# for all log entry types, etc
 //
 // - Does not insert carriage returns in output, does cleaner formatting of
 // prefixes and meta-data with multiline or non-newline terminated output (vs
 // Go's 'log' pkg)
 //
-// - Fatal errors can be marked up with a stack trace easily (via env or api)
+// - Non-zero exits can be marked up with a stack trace easily (via env or api)
 //
-// - Easily redirect or grab screen (or logfile) output, eg: via bufio io.Writer
+// - Coming: github.com/dvln/in for prompting/paging, to work w/this package
 //
-// - Coming: github.com/dvln/in for prompting/paging to work w/this package
+// The 'out' package is designed as a singleton (currently) although one could,
+// I suppose, turn 'outputter' into 'Outputter' and offer up each of the API's
+// via methods on (*Outputter) if desired.  Note: if you wish to do that you
+// must first improve the global *Newline variables as they only work for a
+// singleton today.
 //
 // Usage:   (Note: each is like 'fmt' syntax for Print, Printf, Println)
 //	// For extremely detailed debugging, "<date/time> Trace: " prefix by default
@@ -62,11 +66,13 @@
 //
 // Aside: for my CLI's options I like "[-d | --debug]" and "[-v | --verbose]"
 // to control tool output verbosity, ie: "-dv" (both) is the "output everything"
-// level via the Trace level, "-d" sets the Debug level and all levels below,
-// "-v" sets the Verbose level and all levels below and the default is the basic
-// Info/Print level.  If the "[-q | --quiet]" opt one could further set that to
-// map to the Issue level and perhaps "-qv" maps to the Note level.
-//
+// mode via the Trace level, just "-d" is the Debug level and all levels below,
+// just "-v" sets the Verbose level and all levels below and Info/Print is the
+// default devel with none of those options.  Use of [-t | --terse ] maps to
+// the Issue and below levels (or whatever you like)... and perhaps "-tv" could
+// map to the Note level if you wanted to go that route.  I recommend that the
+// viper/cobra packages be used to allow control via CLI, env, config file, etc
+// so the user has flexibility in setting their defaults.
 package out
 
 import (
@@ -133,10 +139,10 @@ const (
 // These are primarily for inserting prefixes on printed strings so we can put
 // the prefix insert into different modes as needed, see doPrefixing() below.
 const (
-	alwaysInsert  = 1 << iota // Prefix every line, regardless of output history
-	smartInsert               // Use previous output context to decide on prefix
-	blankInsert               // Only spaces inserted (same length as prefix)
-	skipFirstLine             // 1st line in multi-line string has no prefix
+	AlwaysInsert  = 1 << iota // Prefix every line, regardless of output history
+	SmartInsert               // Use previous output context to decide on prefix
+	BlankInsert               // Only spaces inserted (same length as prefix)
+	SkipFirstLine             // 1st line in multi-line string has no prefix
 )
 
 // Level type is just an int, see related const enum with LevelTrace, ..
@@ -152,9 +158,15 @@ type Level int
 // flags (if timestamp/filename/line# desired), etc.  These are bootstrapped
 // at startup to reasonable values for screen output and can be controlled
 // via the exported methods
+// WARNING: if you make this exported you need to adjust screenNewline and
+// the related logfileNewline variables so they are not global but are instead
+// specific to a "pair" of screen/logfile handles (right now that's all we
+// handle is just the "global" pair so it works fine, but if you make the
+// type Outputter exported and add in ..,Print*,Note*,Issue*,Fatal* methods
+// on Outputter's as well then you need to solve that first)
 type outputter struct {
 	mu          sync.Mutex // ensures atomic writes; protects these fields:
-	level       Level      // below data tells how this logging level works
+	level       Level      // below data tells how each logging level works
 	prefix      string     // prefix for this logging level (if any)
 	buf         []byte     // for accumulating text to write at this level
 	screenHndl  io.Writer  // io.Writer for "screen" output
@@ -187,10 +199,12 @@ var (
 	// As output is displayed track if last message ended in a newline or not,
 	// both to the screen and to the log (as levels may cause output to differ)
 	// Note: this is tracked across *all* output levels so if you have done
-	// something interesting like redirecting to different writers for logfile
-	// output (eg: pointing at different log files) then this doesn't make a ton
-	// of sense and you likely want to implement this ability via a couple of
-	// booleans in the outputter struct and implement a mechanism to use that
+	// something "interesting" like redirecting to different writers for logfile
+	// output (eg: pointing at different log files for different levels) then
+	// the below globs don't really work since they treat screen output (all
+	// levels as visible in the same "stream" and log output the same way).
+	// If you're doing this then you may need to re-work the package a bit,
+	// you could track *NewLines for each level independently for example.
 	screenNewline  = true
 	logfileNewline = true
 
@@ -697,18 +711,18 @@ func getStackTrace(exitVal int) string {
 	return myStack
 }
 
-// insertPrefix takes a multiline string (potentially) and for each
+// InsertPrefix takes a multiline string (potentially) and for each
 // line places a string prefix in front of each line, for control
 // there is a bitmap of:
-//   alwaysInsert            // Prefix every line, regardless of output history
-//   smartInsert             // Use previous output context to decide on prefix
-//   blankInsert             // Only spaces inserted (same length as prefix)
-//   skipFirstLine           // 1st line in multi-line string has no prefix
-func insertPrefix(s string, prefix string, ctrl int) string {
+//   AlwaysInsert            // Prefix every line, regardless of output history
+//   SmartInsert             // Use previous output context to decide on prefix
+//   BlankInsert             // Only spaces inserted (same length as prefix)
+//   SkipFirstLine           // 1st line in multi-line string has no prefix
+func InsertPrefix(s string, prefix string, ctrl int) string {
 	if prefix == "" {
 		return s
 	}
-	if ctrl&alwaysInsert != 0 {
+	if ctrl&AlwaysInsert != 0 {
 		ctrl = 0 // turn off everything, always means *always*
 	}
 	pfxLength := len(prefix)
@@ -717,9 +731,9 @@ func insertPrefix(s string, prefix string, ctrl int) string {
 	newLines := []string{}
 	for idx, line := range lines {
 		if (idx == numLines-1 && line == "") ||
-			(idx == 0 && ctrl&skipFirstLine != 0) {
+			(idx == 0 && ctrl&SkipFirstLine != 0) {
 			newLines = append(newLines, line)
-		} else if ctrl&blankInsert != 0 {
+		} else if ctrl&BlankInsert != 0 {
 			format := "%" + fmt.Sprintf("%d", pfxLength) + "s"
 			spacePrefix := fmt.Sprintf(format, "")
 			newLines = append(newLines, spacePrefix+line)
@@ -766,14 +780,14 @@ func (o *outputter) exit(exitVal int) {
 	// get the stacktrace if it's configured
 	stacktrace := getStackTrace(exitVal)
 	if stacktrace != "" && o.level >= screenThreshold && o.level != LevelDiscard {
-		_, err := o.screenHndl.Write([]byte(o.doPrefixing(stacktrace, ForScreen, smartInsert)))
+		_, err := o.screenHndl.Write([]byte(o.doPrefixing(stacktrace, ForScreen, SmartInsert)))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%sError writing stacktrace to screen output handle:\n%+v\n", o.prefix, err)
 			os.Exit(1)
 		}
 	}
 	if stacktrace != "" && o.level >= logThreshold && o.level != LevelDiscard {
-		o.logfileHndl.Write([]byte(o.doPrefixing(stacktrace, ForLogfile, smartInsert)))
+		o.logfileHndl.Write([]byte(o.doPrefixing(stacktrace, ForLogfile, SmartInsert)))
 	}
 	os.Exit(exitVal)
 }
@@ -851,7 +865,7 @@ func getFlagString(buf *[]byte, flags int, file string, line int, t time.Time) s
 
 // insertFlagMetadata basically checks to see what flags are set for
 // the current screen or logfile output and inserts the meta-data in
-// front of the string, see insertPrefix for ctrl description, tgt
+// front of the string, see InsertPrefix for ctrl description, tgt
 // here is either ForScreen or ForLogfile (constants) for output
 func (o *outputter) insertFlagMetadata(s string, tgt int, ctrl int) string {
 	now := time.Now() // do this before Caller below, can take some time
@@ -884,7 +898,7 @@ func (o *outputter) insertFlagMetadata(s string, tgt int, ctrl int) string {
 	if leader == "" {
 		return s
 	}
-	s = insertPrefix(s, leader, ctrl)
+	s = InsertPrefix(s, leader, ctrl)
 	return (s)
 }
 
@@ -927,7 +941,7 @@ func (o *outputter) insertFlagMetadata(s string, tgt int, ctrl int) string {
 //
 // One more note, if a stack trace is added on a Fatal error (if turned on)
 // then we force add a newline if the fatal doesn't have one and dump the
-// stack trace with 'blankInsert' so the stack trace is associated with
+// stack trace with 'BlankInsert' so the stack trace is associated with
 // that fatal print, eg:
 //   os.Setenv("PKG_OUT_NONZERO_EXIT_STACKTRACE", "1")
 //   out.Fatal("Severe error, giving up\n")    [use better errors of course]
@@ -951,13 +965,13 @@ func (o *outputter) doPrefixing(s string, forWhat int, ctrl int) string {
 	} else {
 		Fatalln("Invalid target for output given in doPrefixing():", forWhat)
 	}
-	if !onNewline && ctrl&smartInsert != 0 {
-		ctrl = ctrl | skipFirstLine
+	if !onNewline && ctrl&SmartInsert != 0 {
+		ctrl = ctrl | SkipFirstLine
 	}
-	s = insertPrefix(s, o.prefix, ctrl)
+	s = InsertPrefix(s, o.prefix, ctrl)
 
 	if os.Getenv("PKG_OUT_SMART_FLAGS_PREFIX") == "off" {
-		ctrl = alwaysInsert // forcibly add prefix without smarts
+		ctrl = AlwaysInsert // forcibly add prefix without smarts
 	}
 	// now set up metadata prefix (eg: timestamp), if any, same as above
 	// it has the brains to not add in a prefix if not needed or wanted
@@ -975,7 +989,7 @@ func (o *outputter) stringOutput(s string) {
 		stacktrace = getStackTrace(1)
 	}
 	if o.level >= screenThreshold && o.level != LevelDiscard {
-		pfxScreenStr := o.doPrefixing(s, ForScreen, smartInsert)
+		pfxScreenStr := o.doPrefixing(s, ForScreen, SmartInsert)
 		_, err := o.screenHndl.Write([]byte(pfxScreenStr))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%sError writing to screen output handler:\n%+v\noutput:\n%s\n", o.prefix, err, s)
@@ -991,7 +1005,7 @@ func (o *outputter) stringOutput(s string) {
 				// ignore errors, just quick "prettyup" attempt:
 				o.screenHndl.Write([]byte("\n"))
 			}
-			_, err = o.screenHndl.Write([]byte(o.doPrefixing(stacktrace, ForScreen, smartInsert)))
+			_, err = o.screenHndl.Write([]byte(o.doPrefixing(stacktrace, ForScreen, SmartInsert)))
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%sError writing stacktrace to screen output handle:\n%+v\n", o.prefix, err)
 				os.Exit(1)
@@ -1001,7 +1015,7 @@ func (o *outputter) stringOutput(s string) {
 
 	// print to the log file writer next
 	if o.level >= logThreshold && o.level != LevelDiscard {
-		pfxLogfileStr := o.doPrefixing(s, ForLogfile, smartInsert)
+		pfxLogfileStr := o.doPrefixing(s, ForLogfile, SmartInsert)
 		o.logfileHndl.Write([]byte(pfxLogfileStr))
 		if s[len(s)-1] == 0x0A {
 			logfileNewline = true
@@ -1012,7 +1026,7 @@ func (o *outputter) stringOutput(s string) {
 			if !logfileNewline {
 				o.logfileHndl.Write([]byte("\n"))
 			}
-			o.logfileHndl.Write([]byte(o.doPrefixing(stacktrace, ForLogfile, smartInsert)))
+			o.logfileHndl.Write([]byte(o.doPrefixing(stacktrace, ForLogfile, SmartInsert)))
 		}
 	}
 	// if we're fatal erroring then we need to exit unless overrides in play,

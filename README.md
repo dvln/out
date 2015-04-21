@@ -8,13 +8,16 @@ various levels, eg: out.Printf, out.Println, out.Print, out.Debugln,
 out.Issueln, out.Issuef, out.Errorln, out.Errorf, out.Fatal, out.Fatalf, etc.
 Combine this with independent control of prefixes, flags for time/date and
 file/line#, output thresholds and clean indenting and prefixing for multi-line
-messages as well as for non-newline terminated messages.
+messages as well as for non-newline terminated messages... and you have a
+package that might be of some use.
 
 This started life as a wrapper around the Go standard 'log' library allowing two
 Loggers to be independently controlled (one typically writing to the screen and
 one to a log file), based on spf13's jwalterweatherman package... but upon
-further use I found 'log' to be too limiting and so built everything in using
-io.Writer's directly.  Features:
+further use I found 'log' to be too limiting in how it formats output and
+jww to be a bit too restrictive in pushing to both output streams with different
+threshold levels and flag-based add-on fields.  With this in mind this package
+builds everything on using io.Writer's directly.  Overview:
 
 1. Ready for basic screen output immediately
 2. Trivial to "turn on" logging to a for a temp or named log file
@@ -23,6 +26,7 @@ io.Writer's directly.  Features:
 5. Clean alignment and handling for multi-line strings or strings w/no newlines
 6. Avoids insertion of newlines into the screen or log file io.Writers
 7. Ability to easily add stack traces on Fatal class errors
+8. Attempts to be "safe" for concurrent use (this may need refining)
 
 # Usage
 
@@ -57,8 +61,12 @@ see below).  Standard usage:
 
     ...
     if err != nil {
-        // Something like an issue to take note of but recoverable
-        out.Issueln(err, "\nRecovering and continuing ..")
+        // Something like an issue to take note of but recoverable,
+        // here output is:
+        //   Issue: <error>
+        //   Issue: Recovering and continuing with the process ..
+        out.Issue(err, "\nRecovering and continuing ")
+        out.Issueln("with the process ..")
     }
     ...
     if err1 != nil {
@@ -81,9 +89,12 @@ set of options in my CLI's (with "-d" and "-v" short names) so that items
 like "-dv" can map to Trace level output, "-d" to Debug level output
 and "-v" to Verbose level output with none of these opts mapping to
 normal Print/Info level output.  Extend with "--terse" and "-t" and/or
-a "--quiet" and "-q" or other options to map to higher levels of output
-along with items like "--log" to kick on temp file logging.  Do what you
-wish of course.
+other options to map to higher levels of output along with items like
+"--record" to kick on temp file logging.  I like spf13's cobra/viper
+packages for CLI management and configuration (allowing flexible CLI
+use, env's, config file, overrides, etc), see github.com/dvln for
+copies of viper and related packages using 'out' for output.
+
 
 The default settings add prefixes for you on some of the messages, the
 defaults are:
@@ -105,7 +116,7 @@ turned on that's also possible, if you want everything to go to stdout or if
 if you want to change the default threshold to verbose instead of Print/Info...
 all possible.  Adjustments via the API are covered below.
 
-For log files output keep in mind the default is ioutil.Discard for the
+For log file output keep in mind the default is ioutil.Discard for the
 io.Writer effectively meaning /dev/null to start with.  However, if you
 set a log file up (as below) the default log file output starts out 
 configured to behave like the below:
