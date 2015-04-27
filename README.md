@@ -19,13 +19,13 @@ jww to be a bit too restrictive in pushing to both output streams with different
 threshold levels and flag-based add-on fields.  With this in mind this package
 builds everything on using io.Writer's directly.  Overview:
 
-1. Ready for basic screen output immediately
-2. Trivial to "turn on" logging to a for a temp or named log file
+1. Ready for basic CLI screen output out of the box
+2. Trivial to "turn on" logging (output mirroring) to a temp or named log file
 3. Independent io.Writer control over screen and log file output thresholds
-4. Independent control over flags (ie: add metadata like date/time, file)
+4. Independent control over flags (ie: add metadata like date/time, file/line#)
 5. Clean alignment and handling for multi-line strings or strings w/no newlines
 6. Avoids insertion of newlines into the screen or log file io.Writers
-7. Ability to easily add stack traces on Fatal class errors
+7. Ability to easily add stack traces on non-zero exit (eg: Fatal*) class errors
 8. Attempts to be "safe" for concurrent use (this may need refining)
 
 # Usage
