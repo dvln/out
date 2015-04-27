@@ -318,9 +318,9 @@ Another option: leave the screen alone and use the log file writer as a buffer:
 	// no timestamps or filenames/etc added in), note that the LevelAll
     // impacts all levels whereas specific levels only impact that specific
     // given level (could be a bit flag later).
-	out.SetFlag(LevelAll, 0, ForLogfile)
-	out.SetFlag(LevelTrace, out.Lstdflags, ForLogfile)
-	out.SetFlag(LevelDebug, out.Lstdflags, ForLogfile)
+	out.SetFlag(LevelAll, 0, out.ForLogfile)
+	out.SetFlag(LevelTrace, out.Lstdflags, out.ForLogfile)
+	out.SetFlag(LevelDebug, out.Lstdflags, out.ForLogfile)
     ...
     // Now lets set up a buffer for the "logfile" output (it is, of course,
     // no longer a log file really, it's a buffer... but to this package the
