@@ -19,6 +19,8 @@
 //
 // - Ability to "mirror" screen output to log file or any other io.Writer
 //
+// - Ability to dynamically filter debugging output by function or pkg path
+//
 // - Screen and logfile targets can be independently managed, eg: screen
 // gets normal output and errors, log gets full trace/debug output and is
 // augmented with timestamps, Go file/line# for all log entry types, etc
@@ -29,13 +31,13 @@
 //
 // - Non-zero exits can be marked up with a stack trace easily (via env or api)
 //
-// - Coming: github.com/dvln/in for prompting/paging, to work w/this package
+// - Future: github.com/dvln/in for prompting/paging, to work w/this package
 //
 // The 'out' package is designed as a singleton (currently) although one could,
 // I suppose, turn 'outputter' into 'Outputter' and offer up each of the API's
 // via methods on (*Outputter) if desired.  Note: if you wish to do that you
 // must first improve the global *Newline variables as they only work for a
-// singleton today.
+// singleton currently
 //
 // Usage:   (Note: each is like 'fmt' syntax for Print, Printf, Println)
 //	// For extremely detailed debugging, "<date/time> Trace: " prefix by default
@@ -104,6 +106,8 @@ const (
 	Lmicroseconds                 // microsecond resolution: 01:23:23.123123.  assumes Ltime.
 	Llongfile                     // full file name path and line number: /a/b/c/d.go:23
 	Lshortfile                    // just src file name and line #, eg: d.go:23. overrides Llongfile
+	Llongfunc                     // full func signature, dvln/cmd.get for get method in dvln/cmd
+	Lshortfunc                    // just short func signature, trimmed to just get
 	LstdFlags     = Ldate | Ltime // initial values for the standard logger
 )
 
@@ -129,7 +133,7 @@ const (
 
 // Some API's require an indication of if we're adjusting the "screen" output
 // stream or the logfile output stream, use these bitflags anywhere you see
-// forWhat arguments below.
+// outputTgt arguments below.
 const (
 	ForScreen  = 1 << iota              // Bit flag used to indicate screen target
 	ForLogfile                          // Used to indicate logfile target desired
@@ -177,14 +181,14 @@ type outputter struct {
 
 var (
 	// Set up each output level, ie: level, prefix, screen/log hndl, flags, ...
-	trace   = &outputter{level: LevelTrace, prefix: "Trace: ", screenHndl: os.Stdout, screenFlags: LstdFlags, logfileHndl: ioutil.Discard, logFlags: LstdFlags | Lshortfile}
-	debug   = &outputter{level: LevelDebug, prefix: "Debug: ", screenHndl: os.Stdout, screenFlags: LstdFlags, logfileHndl: ioutil.Discard, logFlags: LstdFlags | Lshortfile}
-	verbose = &outputter{level: LevelVerbose, prefix: "", screenHndl: os.Stdout, screenFlags: 0, logfileHndl: ioutil.Discard, logFlags: LstdFlags | Lshortfile}
-	info    = &outputter{level: LevelInfo, prefix: "", screenHndl: os.Stdout, screenFlags: 0, logfileHndl: ioutil.Discard, logFlags: LstdFlags | Lshortfile}
-	note    = &outputter{level: LevelNote, prefix: "Note: ", screenHndl: os.Stdout, screenFlags: 0, logfileHndl: ioutil.Discard, logFlags: LstdFlags | Lshortfile}
-	issue   = &outputter{level: LevelIssue, prefix: "Issue: ", screenHndl: os.Stdout, screenFlags: 0, logfileHndl: ioutil.Discard, logFlags: LstdFlags | Lshortfile}
-	err     = &outputter{level: LevelError, prefix: "ERROR: ", screenHndl: os.Stderr, screenFlags: 0, logfileHndl: ioutil.Discard, logFlags: LstdFlags | Lshortfile}
-	fatal   = &outputter{level: LevelFatal, prefix: "FATAL: ", screenHndl: os.Stderr, screenFlags: 0, logfileHndl: ioutil.Discard, logFlags: LstdFlags | Lshortfile}
+	trace   = &outputter{level: LevelTrace, prefix: "Trace: ", screenHndl: os.Stdout, screenFlags: LstdFlags, logfileHndl: ioutil.Discard, logFlags: LstdFlags | Lmicroseconds | Lshortfile | Lshortfunc}
+	debug   = &outputter{level: LevelDebug, prefix: "Debug: ", screenHndl: os.Stdout, screenFlags: LstdFlags, logfileHndl: ioutil.Discard, logFlags: LstdFlags | Lmicroseconds | Lshortfile | Lshortfunc}
+	verbose = &outputter{level: LevelVerbose, prefix: "", screenHndl: os.Stdout, screenFlags: 0, logfileHndl: ioutil.Discard, logFlags: LstdFlags | Lmicroseconds | Lshortfile | Lshortfunc}
+	info    = &outputter{level: LevelInfo, prefix: "", screenHndl: os.Stdout, screenFlags: 0, logfileHndl: ioutil.Discard, logFlags: LstdFlags | Lmicroseconds | Lshortfile | Lshortfunc}
+	note    = &outputter{level: LevelNote, prefix: "Note: ", screenHndl: os.Stdout, screenFlags: 0, logfileHndl: ioutil.Discard, logFlags: LstdFlags | Lmicroseconds | Lshortfile | Lshortfunc}
+	issue   = &outputter{level: LevelIssue, prefix: "Issue: ", screenHndl: os.Stdout, screenFlags: 0, logfileHndl: ioutil.Discard, logFlags: LstdFlags | Lmicroseconds | Lshortfile | Lshortfunc}
+	err     = &outputter{level: LevelError, prefix: "ERROR: ", screenHndl: os.Stderr, screenFlags: 0, logfileHndl: ioutil.Discard, logFlags: LstdFlags | Lmicroseconds | Lshortfile | Lshortfunc}
+	fatal   = &outputter{level: LevelFatal, prefix: "FATAL: ", screenHndl: os.Stderr, screenFlags: 0, logfileHndl: ioutil.Discard, logFlags: LstdFlags | Lmicroseconds | Lshortfile | Lshortfunc}
 
 	// Set up all the outputter level details in one array (except discard),
 	// the idea that one can control these pretty flexibly (if needed)
@@ -208,8 +212,42 @@ var (
 	screenNewline  = true
 	logfileNewline = true
 
-	// used to request stack traces,on Fatal*, see SetStacktraceOnExit() below
+	// stacktraceOnExit is used to request stack traces,on Fatal*, see
+	// SetStacktraceOnExit() below
 	stacktraceOnExit = false
+
+	// The below "<..>NameLength" flags help to aligh the output when dumping
+	// filenames, line #'s' and function names to a log file in front of the
+	// tools normal output.  This is weak (at best), but usually works "ok"
+	// for paths, file and func name lengths that tend towards shorter.  Note
+	// that if you have different log levels to the same output stream using
+	// different combos of filename/line# and func name meta-data then your
+	// output won't align well (currently), opted not to get too fancy now.
+
+	// ShortFileNameLength is the default "formatting" length for file/line#
+	// from runtime.Caller() (just the filename part of the path), right now
+	// we'll hope filenames don't usually get longer than 10 chars or so (and
+	// there is the :<line#> part of the block which is around 5 chars and
+	// then the trailing colon, so we'll go with 16).  If you have longer
+	// filenames then you can change this setting so your output alignment
+	// improves (or the below settings)
+	ShortFileNameLength = 16
+
+	// LongFileNameLength is the full path and filename plus the line # and
+	// a trailing colon after that... this is hand-wavy but we'll give it
+	// some space for now, adjust as needed for your paths/filenames:
+	LongFileNameLength = 60
+
+	// ShortFuncNameLength ties into function names (if those have been added
+	// to your output metadata via the Lshortfunc flag), right now it expects
+	// method names of around 12 or 13 chars, followed by a colon, adjust as
+	// needed for your own method names
+	ShortFuncNameLength = 14
+
+	// LongFuncNameLength is the full function name which includes the package
+	// name (full path) followed by a dot and then the function name, this may
+	// be a bit short for some folks so adjust as needed.
+	LongFuncNameLength = 30
 )
 
 // levelCheck insures valid log level "values" are provided
@@ -226,11 +264,11 @@ func levelCheck(level Level) Level {
 
 // Threshold returns the current screen or logfile output threshold level
 // depending upon which is requested, either out.ForScreen or out.ForLogfile
-func Threshold(forWhat int) Level {
+func Threshold(outputTgt int) Level {
 	var threshold Level
-	if forWhat&ForScreen != 0 {
+	if outputTgt&ForScreen != 0 {
 		threshold = screenThreshold
-	} else if forWhat&ForLogfile != 0 {
+	} else if outputTgt&ForLogfile != 0 {
 		threshold = logThreshold
 	} else {
 		Fatalln("Invalid screen/logfile given for Threshold()")
@@ -239,13 +277,13 @@ func Threshold(forWhat int) Level {
 }
 
 // SetThreshold sets the screen and or logfile output threshold(s) to the given
-// level, forWhat can be set to out.ForScreen, out.ForLogfile or both |'d
+// level, outputTgt can be set to out.ForScreen, out.ForLogfile or both |'d
 // together, level is out.LevelInfo for example (any valid level)
-func SetThreshold(level Level, forWhat int) {
-	if forWhat&ForScreen != 0 {
+func SetThreshold(level Level, outputTgt int) {
+	if outputTgt&ForScreen != 0 {
 		screenThreshold = levelCheck(level)
 	}
-	if forWhat&ForLogfile != 0 {
+	if outputTgt&ForLogfile != 0 {
 		logThreshold = levelCheck(level)
 	}
 }
@@ -271,29 +309,29 @@ func SetPrefix(level Level, prefix string) {
 // Discard disables all screen and/or logfile output, can be done via
 // SetThreshold() as well (directly) or via SetWriter() to something
 // like ioutil.Discard or bufio io.Writer if you want to capture output.
-// Anyhow, this is a quick way to disable output (if forWhat is not set
+// Anyhow, this is a quick way to disable output (if outputTgt is not set
 // to out.ForScreen or out.ForLogfile or both | together nothing happens)
-func Discard(forWhat int) {
-	if forWhat&ForScreen != 0 {
+func Discard(outputTgt int) {
+	if outputTgt&ForScreen != 0 {
 		SetThreshold(LevelDiscard, ForScreen)
 	}
-	if forWhat&ForLogfile != 0 {
+	if outputTgt&ForLogfile != 0 {
 		SetThreshold(LevelDiscard, ForLogfile)
 	}
 }
 
 // Flags gets the screen or logfile output flags (Ldate, Ltime, .. above),
 // you must give one or the other (out.ForScreen or out.ForLogfile) only.
-func Flags(level Level, forWhat int) int {
+func Flags(level Level, outputTgt int) int {
 	level = levelCheck(level)
 	flags := 0
 	for _, o := range outputters {
 		o.mu.Lock()
 		defer o.mu.Unlock()
 		if o.level == level {
-			if forWhat&ForScreen != 0 {
+			if outputTgt&ForScreen != 0 {
 				flags = o.screenFlags
-			} else if forWhat&ForLogfile != 0 {
+			} else if outputTgt&ForLogfile != 0 {
 				flags = o.logFlags
 			} else {
 				Fatalln("Invalid identification of screen or logfile target for Flags()")
@@ -309,15 +347,15 @@ func Flags(level Level, forWhat int) int {
 // can give it out.ForScreen, out.ForLogfile or both or'd together although
 // usually one would want to give just one to adjust (screen or logfile)
 // FIXME: a bitmap would be more flexible than current levels
-func SetFlags(level Level, flags int, forWhat int) {
+func SetFlags(level Level, flags int, outputTgt int) {
 	for _, o := range outputters {
 		o.mu.Lock()
 		defer o.mu.Unlock()
 		if level == LevelAll || o.level == level {
-			if forWhat&ForScreen != 0 {
+			if outputTgt&ForScreen != 0 {
 				o.screenFlags = flags
 			}
-			if forWhat&ForLogfile != 0 {
+			if outputTgt&ForLogfile != 0 {
 				o.logFlags = flags
 			}
 			if level != LevelAll {
@@ -328,17 +366,17 @@ func SetFlags(level Level, flags int, forWhat int) {
 }
 
 // Writer gets the screen or logfile output io.Writer for the given log
-// level, forWhat is out.ForScreen or out.ForLogfile depending upon which
+// level, outputTgt is out.ForScreen or out.ForLogfile depending upon which
 // writer you want to grab for the given logging level
-func Writer(level Level, forWhat int) io.Writer {
+func Writer(level Level, outputTgt int) io.Writer {
 	level = levelCheck(level)
 	writer := ioutil.Discard
 	for _, o := range outputters {
 		if o.level == level {
-			if forWhat&ForScreen != 0 {
+			if outputTgt&ForScreen != 0 {
 				writer = o.screenHndl
 			}
-			if forWhat&ForLogfile != 0 {
+			if outputTgt&ForLogfile != 0 {
 				writer = o.logfileHndl
 			}
 		}
@@ -349,15 +387,15 @@ func Writer(level Level, forWhat int) io.Writer {
 // SetWriter sets the screen and/or logfile output io.Writer for every log
 // level to the given writer
 // FIXME: a bitmap would be more flexible than current levels
-func SetWriter(level Level, w io.Writer, forWhat int) {
+func SetWriter(level Level, w io.Writer, outputTgt int) {
 	for _, o := range outputters {
 		if level == LevelAll || o.level == level {
 			o.mu.Lock()
 			defer o.mu.Unlock()
-			if forWhat&ForScreen != 0 {
+			if outputTgt&ForScreen != 0 {
 				o.screenHndl = w
 			}
-			if forWhat&ForLogfile != 0 {
+			if outputTgt&ForLogfile != 0 {
 				o.logfileHndl = w
 			}
 			if level != LevelAll {
@@ -379,11 +417,11 @@ func SetWriter(level Level, w io.Writer, forWhat int) {
 // newline was hit and any fresh output can be prefixed cleanly:
 //   out.ResetNewline(true, out.ForScreen|out.ForLogfile)
 // Note: for any *output* running through this module this is auto-handled
-func ResetNewline(val bool, forWhat int) {
-	if forWhat&ForScreen != 0 {
+func ResetNewline(val bool, outputTgt int) {
+	if outputTgt&ForScreen != 0 {
 		screenNewline = val
 	}
-	if forWhat&ForLogfile != 0 {
+	if outputTgt&ForLogfile != 0 {
 		logfileNewline = val
 	}
 }
@@ -780,22 +818,27 @@ func (o *outputter) exit(exitVal int) {
 	// get the stacktrace if it's configured
 	stacktrace := getStackTrace(exitVal)
 	if stacktrace != "" && o.level >= screenThreshold && o.level != LevelDiscard {
-		_, err := o.screenHndl.Write([]byte(o.doPrefixing(stacktrace, ForScreen, SmartInsert)))
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "%sError writing stacktrace to screen output handle:\n%+v\n", o.prefix, err)
-			os.Exit(1)
+		msg, supressOutput := o.doPrefixing(stacktrace, ForScreen, SmartInsert)
+		if !supressOutput {
+			_, err := o.screenHndl.Write([]byte(msg))
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%sError writing stacktrace to screen output handle:\n%+v\n", o.prefix, err)
+				os.Exit(1)
+			}
 		}
 	}
 	if stacktrace != "" && o.level >= logThreshold && o.level != LevelDiscard {
-		o.logfileHndl.Write([]byte(o.doPrefixing(stacktrace, ForLogfile, SmartInsert)))
+		msg, supressOutput := o.doPrefixing(stacktrace, ForLogfile, SmartInsert)
+		if !supressOutput {
+			o.logfileHndl.Write([]byte(msg))
+		}
 	}
 	os.Exit(exitVal)
 }
 
 // iota converts an int to fixed-width decimal ASCII.  Give a negative width to
 // avoid zero-padding.  Knows the buffer has capacity.  Taken from Go's 'log'
-// pkg since we want the same formatting but we want to indent multi-line
-// strings a bit more cleanly for readability in logs and on output.
+// pkg since we want some of the same formatting.
 func itoa(buf *[]byte, i int, wid int) {
 	u := uint(i)
 	if u == 0 && wid <= 1 {
@@ -814,9 +857,9 @@ func itoa(buf *[]byte, i int, wid int) {
 }
 
 // getFlagString takes the time the output func was called and tries
-// to construct a Go 'log' type set of settings (actually using the
-// flag bitmap from log and borrowing the logic from log.go)
-func getFlagString(buf *[]byte, flags int, file string, line int, t time.Time) string {
+// to construct a string to put in the log file (uses the flags bitmap
+// to decide what to print)
+func getFlagString(buf *[]byte, flags int, funcName string, file string, line int, t time.Time) string {
 	if flags&(Ldate|Ltime|Lmicroseconds) != 0 {
 		if flags&Ldate != 0 {
 			year, month, day := t.Date()
@@ -842,7 +885,9 @@ func getFlagString(buf *[]byte, flags int, file string, line int, t time.Time) s
 		}
 	}
 	if flags&(Lshortfile|Llongfile) != 0 {
+		formatLen := LongFileNameLength
 		if flags&Lshortfile != 0 {
+			formatLen = ShortFileNameLength
 			short := file
 			for i := len(file) - 1; i > 0; i-- {
 				if file[i] == '/' {
@@ -851,55 +896,111 @@ func getFlagString(buf *[]byte, flags int, file string, line int, t time.Time) s
 				}
 			}
 			file = short
-			file = fmt.Sprintf("%16s", file)
-		} else {
-			file = fmt.Sprintf("%40s", file)
 		}
-		*buf = append(*buf, file...)
-		*buf = append(*buf, ':')
-		itoa(buf, line, -1)
-		*buf = append(*buf, ": "...)
+		var tmpbuf []byte
+		tmpslice := &tmpbuf
+		*tmpslice = append(*tmpslice, file...)
+		*tmpslice = append(*tmpslice, ':')
+		itoa(tmpslice, line, -1)
+		*tmpslice = append(*tmpslice, ':')
+		if flags&Lshortfunc != 0 {
+			formatLen = formatLen + ShortFuncNameLength
+			parts := strings.Split(funcName, ".")
+			var justFunc string
+			if len(parts) > 1 {
+				justFunc = parts[1]
+			} else {
+				justFunc = "???"
+			}
+			*tmpslice = append(*tmpslice, justFunc...)
+			*tmpslice = append(*tmpslice, ": "...)
+		} else if flags&Llongfunc != 0 {
+			formatLen = formatLen + LongFuncNameLength
+			*tmpslice = append(*tmpslice, funcName...)
+			*tmpslice = append(*tmpslice, ": "...)
+		} else {
+			*tmpslice = append(*tmpslice, ' ')
+		}
+
+		// Note that this length stuff is weak, if you have long filenames,
+		// long func names or long paths to func's it won't do much good as
+		// it's currently written (or if you have different flags across
+		// different log levels... but if consistent then it can help a bit)
+		formatStr := "%-" + fmt.Sprintf("%d", formatLen) + "s"
+		str := fmt.Sprintf(formatStr, string(*tmpslice))
+		*buf = append(*buf, str...)
 	}
 	return fmt.Sprintf("%s", *buf)
 }
 
 // insertFlagMetadata basically checks to see what flags are set for
 // the current screen or logfile output and inserts the meta-data in
-// front of the string, see InsertPrefix for ctrl description, tgt
-// here is either ForScreen or ForLogfile (constants) for output
-func (o *outputter) insertFlagMetadata(s string, tgt int, ctrl int) string {
+// front of the string, see InsertPrefix for ctrl description, outputTgt
+// here is either ForScreen or ForLogfile (constants) for output.  Note that
+// it will also return a boolean to indicate if the output should be supressed
+// or not (typically not but one can filter debug/trace output and if one has
+// set PKG_OUT_DEBUG_SCOPE, see env var elsewhere in this pkg for doc)
+func (o *outputter) insertFlagMetadata(s string, outputTgt int, ctrl int) (string, bool) {
 	now := time.Now() // do this before Caller below, can take some time
 	var file string
+	var funcName string
 	var line int
+	var flags int
+	var supressOutput bool
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	var flags int
 	// if printing to the screen target use those flags, else use logfile flags
-	if tgt&ForScreen != 0 {
+	if outputTgt&ForScreen != 0 {
 		flags = o.screenFlags
-	} else if tgt&ForLogfile != 0 {
+	} else if outputTgt&ForLogfile != 0 {
 		flags = o.logFlags
 	} else {
-		Fatalln("Invalid target passed to insertFlagMetadata():", tgt)
+		Fatalln("Invalid target passed to insertFlagMetadata():", outputTgt)
 	}
-	if flags&(Lshortfile|Llongfile) != 0 {
-		// this can take a little while so unlock the mutex
+	supressOutput = false
+	if flags&(Lshortfile|Llongfile|Lshortfunc|Llongfunc) != 0 ||
+		os.Getenv("PKG_OUT_DEBUG_SCOPE") != "" {
+		// Caller() can take a little while so unlock the mutex
 		o.mu.Unlock()
 		var ok bool
-		_, file, line, ok = runtime.Caller(5)
+		var pc uintptr
+		pc, file, line, ok = runtime.Caller(5)
 		if !ok {
 			file = "???"
 			line = 0
+			funcName = "???"
+		} else {
+			f := runtime.FuncForPC(pc)
+			if f == nil {
+				funcName = "???"
+			} else {
+				funcName = f.Name()
+			}
 		}
 		o.mu.Lock()
+		// if the user has restricted debugging output to specific packages
+		// or methods (funcname might be "dvln/lib/out.MethodName" for example)
+		// then we'll supress all debug output outside of the desired scope and
+		// only show those packages or methods of interest... simple substring
+		// match is done currently
+		if debugScope := os.Getenv("PKG_OUT_DEBUG_SCOPE"); funcName != "???" && debugScope != "" && (o.level == LevelDebug || o.level == LevelTrace) {
+			scopeParts := strings.Split(debugScope, ",")
+			supressOutput = true
+			for _, scopePart := range scopeParts {
+				if strings.Contains(funcName, scopePart) {
+					supressOutput = false
+					break
+				}
+			}
+		}
 	}
 	o.buf = o.buf[:0]
-	leader := getFlagString(&o.buf, flags, file, line, now)
+	leader := getFlagString(&o.buf, flags, funcName, file, line, now)
 	if leader == "" {
-		return s
+		return s, supressOutput
 	}
 	s = InsertPrefix(s, leader, ctrl)
-	return (s)
+	return s, supressOutput
 }
 
 // doPrefixing takes the users output string and decides how to prefix
@@ -921,19 +1022,17 @@ func (o *outputter) insertFlagMetadata(s string, tgt int, ctrl int) string {
 //   <date/time> myfile.go:13: Note: This is a test
 //   <date/time> myfile.go:13: Note: and only a test
 //   <date/time> myfile.go:14: Note: that I am showing to John
-//
 // The only thing we "lose" here potentially is that the line that prints
 // the username isn't be prefixed to keep the output clean (no line #15 details)
 // hence we don't have a date/timestamp for that "part" of the output and that
 // could cause someone to think it was line 14 that was slow if the next entry
 // was 20 minutes later (eg: the myfile.go line 16 print statement).  There is
-// a mode to turn off smart flags prefixing so you can see that, one would set
-// PKG_OUT_SMART_FLAGS_PREFIX to "off" to cause this (since no date/time or
-// other flags are active in the prefix for screen output it remains the same):
-//   Note: This is a test
-//   Note: and only a test
-//   Note: and that is it John
-// The log file entry differs though as we can see myfile:15 detail now:
+// a mode to turn off smart flags prefixing so one can see such "invisible"
+// or missing timestamps on the same line... to do that one would set the env
+// PKG_OUT_SMART_FLAGS_PREFIX to "off".  For screen output default settings
+// this changes nothing (flags are off for regular/note/issue/err output).
+// However, the log file entry differs as we can see in the 3rd line, we
+// now see the timestamp and file info for both parts of that line:
 //   <date/time> myfile.go:13: Note: This is a test
 //   <date/time> myfile.go:13: Note: and only a test
 //   <date/time> myfile.go:14: Note: that I am showing to <date/time> myfile:15: John
@@ -953,17 +1052,17 @@ func (o *outputter) insertFlagMetadata(s string, tgt int, ctrl int) string {
 //   <date/time> myfile.go:37: FATAL: <multiline stacktrace here>
 // The goal being readability of the screen and logfile output while conveying
 // information about date/time and source of the fatal error and such
-func (o *outputter) doPrefixing(s string, forWhat int, ctrl int) string {
+func (o *outputter) doPrefixing(s string, outputTgt int, ctrl int) (string, bool) {
 	// where we check out if we previously had no newline and if so the
 	// first line (if multiline) will not have the prefix, see example
 	// in function header around username
 	var onNewline bool
-	if forWhat&ForScreen != 0 {
+	if outputTgt&ForScreen != 0 {
 		onNewline = screenNewline
-	} else if forWhat&ForLogfile != 0 {
+	} else if outputTgt&ForLogfile != 0 {
 		onNewline = logfileNewline
 	} else {
-		Fatalln("Invalid target for output given in doPrefixing():", forWhat)
+		Fatalln("Invalid target for output given in doPrefixing():", outputTgt)
 	}
 	if !onNewline && ctrl&SmartInsert != 0 {
 		ctrl = ctrl | SkipFirstLine
@@ -975,8 +1074,9 @@ func (o *outputter) doPrefixing(s string, forWhat int, ctrl int) string {
 	}
 	// now set up metadata prefix (eg: timestamp), if any, same as above
 	// it has the brains to not add in a prefix if not needed or wanted
-	s = o.insertFlagMetadata(s, forWhat, ctrl)
-	return (s)
+	var supressOutput bool
+	s, supressOutput = o.insertFlagMetadata(s, outputTgt, ctrl)
+	return s, supressOutput
 }
 
 // stringOutput uses existing screen and log levels to decide what, if
@@ -988,24 +1088,29 @@ func (o *outputter) stringOutput(s string) {
 	if o.level == LevelFatal {
 		stacktrace = getStackTrace(1)
 	}
+	var err error
 	if o.level >= screenThreshold && o.level != LevelDiscard {
-		pfxScreenStr := o.doPrefixing(s, ForScreen, SmartInsert)
-		_, err := o.screenHndl.Write([]byte(pfxScreenStr))
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "%sError writing to screen output handler:\n%+v\noutput:\n%s\n", o.prefix, err, s)
-			os.Exit(1)
-		}
-		if s[len(s)-1] == 0x0A { // if last char is a newline..
-			screenNewline = true
-		} else {
-			screenNewline = false
+		pfxScreenStr, supressOutput := o.doPrefixing(s, ForScreen, SmartInsert)
+		if !supressOutput {
+			_, err = o.screenHndl.Write([]byte(pfxScreenStr))
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%sError writing to screen output handler:\n%+v\noutput:\n%s\n", o.prefix, err, s)
+				os.Exit(1)
+			}
+			if s[len(s)-1] == 0x0A { // if last char is a newline..
+				screenNewline = true
+			} else {
+				screenNewline = false
+			}
 		}
 		if o.level == LevelFatal {
 			if !screenNewline {
 				// ignore errors, just quick "prettyup" attempt:
 				o.screenHndl.Write([]byte("\n"))
 			}
-			_, err = o.screenHndl.Write([]byte(o.doPrefixing(stacktrace, ForScreen, SmartInsert)))
+			pfxScreenStr, _ = o.doPrefixing(stacktrace, ForScreen, SmartInsert)
+			// don't need to check supressOutput, possible for debug/trace only
+			_, err = o.screenHndl.Write([]byte(pfxScreenStr))
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%sError writing stacktrace to screen output handle:\n%+v\n", o.prefix, err)
 				os.Exit(1)
@@ -1015,18 +1120,22 @@ func (o *outputter) stringOutput(s string) {
 
 	// print to the log file writer next
 	if o.level >= logThreshold && o.level != LevelDiscard {
-		pfxLogfileStr := o.doPrefixing(s, ForLogfile, SmartInsert)
-		o.logfileHndl.Write([]byte(pfxLogfileStr))
-		if s[len(s)-1] == 0x0A {
-			logfileNewline = true
-		} else {
-			logfileNewline = false
+		pfxLogfileStr, supressOutput := o.doPrefixing(s, ForLogfile, SmartInsert)
+		if !supressOutput {
+			o.logfileHndl.Write([]byte(pfxLogfileStr))
+			if s[len(s)-1] == 0x0A {
+				logfileNewline = true
+			} else {
+				logfileNewline = false
+			}
 		}
 		if o.level == LevelFatal {
 			if !logfileNewline {
 				o.logfileHndl.Write([]byte("\n"))
 			}
-			o.logfileHndl.Write([]byte(o.doPrefixing(stacktrace, ForLogfile, SmartInsert)))
+			pfxLogfileStr, _ = o.doPrefixing(stacktrace, ForLogfile, SmartInsert)
+			// don't need to check supressOutput, possible for debug/trace only
+			o.logfileHndl.Write([]byte(pfxLogfileStr))
 		}
 	}
 	// if we're fatal erroring then we need to exit unless overrides in play,

@@ -97,6 +97,8 @@ func TestOutputln(t *testing.T) {
 	SetThreshold(LevelVerbose, ForScreen)
 	SetThreshold(LevelNote, ForLogfile)
 
+	SetFlags(LevelAll, LstdFlags|Lmicroseconds|Lshortfile|Lshortfunc, ForLogfile)
+
 	Traceln("trace info")
 	Debugln("debugging info")
 	Verboseln("verbose info")
@@ -120,7 +122,10 @@ func TestOutputln(t *testing.T) {
 	assert.NotContains(t, logBuf.String(), "debugging info\n")
 	assert.NotContains(t, logBuf.String(), "verbose info\n")
 	assert.NotContains(t, logBuf.String(), "information\n")
+	assert.NotContains(t, logBuf.String(), "out.TestOutputln")
 	assert.Contains(t, logBuf.String(), "key note\n")
+	assert.Contains(t, logBuf.String(), "out_test.go:")
+	assert.Contains(t, logBuf.String(), "TestOutputln")
 	assert.Contains(t, logBuf.String(), "user issue\n")
 	assert.Contains(t, logBuf.String(), "critical error\n")
 	assert.Contains(t, logBuf.String(), "fatal error\n")
@@ -136,6 +141,15 @@ func TestOutputf(t *testing.T) {
 
 	SetThreshold(LevelTrace, ForScreen|ForLogfile)
 
+	SetFlags(LevelAll, LstdFlags|Lmicroseconds|Lshortfile|Llongfunc, ForBoth)
+
+	os.Setenv("PKG_OUT_DEBUG_SCOPE", "boguspkg.")
+	Tracef("%s\n", "trace info")
+	Debugf("%s\n", "debugging info")
+	assert.NotContains(t, screenBuf.String(), "trace info\n")
+	assert.NotContains(t, screenBuf.String(), "debugging info\n")
+
+	os.Setenv("PKG_OUT_DEBUG_SCOPE", "out.")
 	Tracef("%s\n", "trace info")
 	Debugf("%s\n", "debugging info")
 	Verbosef("%s\n", "verbose info")
@@ -150,7 +164,7 @@ func TestOutputf(t *testing.T) {
 	SetPrefix(LevelFatal, "FATAL: ")
 
 	// debug: if you want to look at this in the test output, uncomment:
-	/* fmt.Println("Screen output:")
+	/*fmt.Println("Screen output:")
 	fmt.Println(screenBuf.String())
 	fmt.Println("Logfile output:")
 	fmt.Println(logBuf.String()) */
@@ -166,6 +180,8 @@ func TestOutputf(t *testing.T) {
 	assert.Contains(t, screenBuf.String(), "stacktrace: stack of")
 
 	assert.Contains(t, logBuf.String(), "trace info\n")
+	assert.Contains(t, logBuf.String(), "out_test.go:")
+	assert.Contains(t, logBuf.String(), "out.TestOutputf")
 	assert.Contains(t, logBuf.String(), "debugging info\n")
 	assert.Contains(t, logBuf.String(), "verbose info\n")
 	assert.Contains(t, logBuf.String(), "information\n")
