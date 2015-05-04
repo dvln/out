@@ -219,7 +219,7 @@ var (
 	// The below "<..>NameLength" flags help to aligh the output when dumping
 	// filenames, line #'s' and function names to a log file in front of the
 	// tools normal output.  This is weak (at best), but usually works "ok"
-	// for paths, file and func name lengths that tend towards shorter.  Note
+	// for paths, file and func name lengths that tend towards "short".  Note
 	// that if you have different log levels to the same output stream using
 	// different combos of filename/line# and func name meta-data then your
 	// output won't align well (currently), opted not to get too fancy now.
