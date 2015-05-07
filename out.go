@@ -992,19 +992,13 @@ func determineFlags(flagStr string) int {
 			flags |= Ldate
 		case "time":
 			flags |= Ltime
-		case "microseconds":
+		case "micro", "microseconds":
 			flags |= Lmicroseconds
-		case "micro":
-			flags |= Lmicroseconds
-		case "shortfile":
-			flags |= Lshortfile
-		case "file":
+		case "file", "shortfile":
 			flags |= Lshortfile
 		case "longfile":
 			flags |= Llongfile
-		case "shortfunc":
-			flags |= Lshortfunc
-		case "func":
+		case "func", "shortfunc":
 			flags |= Lshortfunc
 		case "longfunc":
 			flags |= Llongfunc
