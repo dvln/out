@@ -115,8 +115,8 @@ func TestOutputln(t *testing.T) {
 	assert.Contains(t, screenBuf.String(), "information\n")
 	assert.Contains(t, screenBuf.String(), "Note: key note\n")
 	assert.Contains(t, screenBuf.String(), "Issue: user issue\n")
-	assert.Contains(t, screenBuf.String(), "ERROR: critical error\n")
-	assert.Contains(t, screenBuf.String(), "FATAL: fatal error\n")
+	assert.Contains(t, screenBuf.String(), "Error: critical error\n")
+	assert.Contains(t, screenBuf.String(), "Fatal: fatal error\n")
 
 	assert.NotContains(t, logBuf.String(), "trace info\n")
 	assert.NotContains(t, logBuf.String(), "debugging info\n")
@@ -161,7 +161,7 @@ func TestOutputf(t *testing.T) {
 	os.Setenv("PKG_OUT_NONZERO_EXIT_STACKTRACE", "1")
 	SetPrefix(LevelFatal, "PANIC: ")
 	Fatalf("%s\n", "fatal error")
-	SetPrefix(LevelFatal, "FATAL: ")
+	SetPrefix(LevelFatal, "Fatal: ")
 
 	// debug: if you want to look at this in the test output, uncomment:
 	/*fmt.Println("Screen output:")
@@ -175,7 +175,7 @@ func TestOutputf(t *testing.T) {
 	assert.Contains(t, screenBuf.String(), "information\n")
 	assert.Contains(t, screenBuf.String(), "Note: key note\n")
 	assert.Contains(t, screenBuf.String(), "Issue: user issue\n")
-	assert.Contains(t, screenBuf.String(), "ERROR: critical error\n")
+	assert.Contains(t, screenBuf.String(), "Error: critical error\n")
 	assert.Contains(t, screenBuf.String(), "PANIC: fatal error\n")
 	assert.Contains(t, screenBuf.String(), "stacktrace: stack of")
 
@@ -269,8 +269,8 @@ func TestTempFileOutput(t *testing.T) {
 	assert.Contains(t, screenBuf.String(), "information\n")
 	assert.Contains(t, screenBuf.String(), "Note: key note\n")
 	assert.Contains(t, screenBuf.String(), "Issue: user issue\n")
-	assert.Contains(t, screenBuf.String(), "ERROR: critical error\n")
-	assert.Contains(t, screenBuf.String(), "FATAL: fatal error\n")
+	assert.Contains(t, screenBuf.String(), "Error: critical error\n")
+	assert.Contains(t, screenBuf.String(), "Fatal: fatal error\n")
 	assert.Contains(t, screenBuf.String(), "stacktrace: stack of")
 
 	logFileBuf, readerr := ioutil.ReadFile(logFileName)

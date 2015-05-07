@@ -375,10 +375,6 @@ Another option: leave the screen alone and use the log file writer as a buffer:
 ## Environment settings
 Currently there's only a couple:
 
- * PKG_OUT_NONZERO_EXIT_STACKTRACE env set to "1" causes stacktraces to kick in
-   for any non-zero exit done through this package (os.Exit() is not affected),
-   so basically if you use IssueExit... or ErrorExit... or Fatal... it works
-
  * PKG_OUT_DEBUG_SCOPE env can be set to to a list of packages or functions
    to restrict debug/trace output to, useful to trim debugging output and focus
    on a specific set of function(s) or packages(s).  This is basically just a
@@ -389,6 +385,27 @@ Currently there's only a couple:
    to "mypkg." and all other debug/trace output is not shown, if you want two
    packages then set it to "mypkg.,coolpkg." for example, if you want a pkg
    specific function then "mypkg.FuncA" could be used, etc.
+
+ * PKG_OUT_LOGFILE_FLAGS and PKG_OUT_SCREEN_FLAGS env are used to dynamically
+   tweak the screen or log "flags". This can be useful typically for adding in
+   some flags for the screen output when debugging to see file/line#/function
+   details inline withoutput (whatever flags you want, comma separated):
+```go
+   Predefined "group" settings, "debug" recommended really:
+
+     "debug"  : time.microseconds shortfile:line#:shortfunc           : <output>
+     "all"    : [pid] date time.microseconds shortfile:line#:shortfunc: <output>
+     "longall": [pid] date time.microseconds longfile:line#:longfunc  : <output>
+
+   Individual settings which can be combined (including to groups) are:
+
+     "pid", "date", "time", "micro"|"microseconds", "file"|"shortfile",
+     "longfile", "func"|"shortfunc", "longfunc" or "off".  Note that the
+     "off" setting turns all flags off and trumps everything else if used.```
+
+ * PKG_OUT_NONZERO_EXIT_STACKTRACE env set to "1" causes stacktraces to kick in
+   for any non-zero exit done through this package (os.Exit() is not affected),
+   so basically if you use IssueExit... or ErrorExit... or Fatal... it works
 
 And one meant for internal use (eg: for testing purposes):
 
