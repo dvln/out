@@ -391,15 +391,15 @@ Currently there's only a couple:
    some flags for the screen output when debugging to see file/line#/function
    details inline withoutput (whatever flags you want, comma separated):
 ```go
-   Predefined "group" settings, "debug" recommended really:
+   Predefined "group" settings, "debug" recommended really (LEVEL = output lvl):
 
-     "debug"  : time.microseconds shortfile:line#:shortfunc           : <output>
-     "all"    : [pid] date time.microseconds shortfile:line#:shortfunc: <output>
-     "longall": [pid] date time.microseconds longfile:line#:longfunc  : <output>
+     "debug"  : LEVEL time.microseconds shortfile:line#:shortfunc           : <output>
+     "all"    : [pid] LEVEL date time.microseconds shortfile:line#:shortfunc: <output>
+     "longall": [pid] LEVEL date time.microseconds longfile:line#:longfunc  : <output>
 
    Individual settings which can be combined (including to groups) are:
 
-     "pid", "date", "time", "micro"|"microseconds", "file"|"shortfile",
+     "pid", "level", date", "time", "micro"|"microseconds", "file"|"shortfile",
      "longfile", "func"|"shortfunc", "longfunc" or "off".  Note that the
      "off" setting turns all flags off and trumps everything else if used.```
 

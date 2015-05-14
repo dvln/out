@@ -97,17 +97,19 @@ import (
 	"time"
 )
 
-// These bit flags are borrowed from Go's log package, behave the same "mostly"
-// but handle multi-line strings and non-newline terminated strings better
-// when adding markup like date/time and file/line# meta-data to either
-// screen or log output stream (also better aligns the data overall).  If
-// date and time with milliseconds is on and long filename w/line# it'll
+// Some of these flags are borrowed from Go's log package and "mostly" behave
+// the same but handle multi-line strings and non-newline terminated strings
+// differently when adding markup like date/time and file/line# meta-data to
+// either screen or log output stream (also better aligns the data overall).
+// If date and time with milliseconds is on and long filename w/line# it'll
 // look like this:
-//   2009/01/23 01:23:23.123123 /a/b/c/d.go:23: [LvlPrefix: ]<message>
+//   2009/01/23 01:23:23.123123 /a/b/c/d.go:23: [LvlPrefix: ]<mesg>
+// If one adds in the pid and level settings it will look like this:
+//   [pid] LEVEL 2009/01/23 01:23:23.123123 /a/b/c/d.go:23: [LvlPrefix: ]<mesg>
 // And with the flags not on (note that the level prefix depends upon what
 // level one is printing output at and it can be adjusted as well):
 //   [LvlPrefix: ]<message>
-// See SetFlags() below for adjusting settings and Flags() to query settings
+// See SetFlags() below for adjusting settings and Flags() to query settings.
 const (
 	Ldate         = 1 << iota     // the date: 2009/01/23
 	Ltime                         // the time: 01:23:23
@@ -117,9 +119,10 @@ const (
 	Llongfunc                     // full func signature, dvln/cmd.get for get method in dvln/cmd
 	Lshortfunc                    // just short func signature, trimmed to just get
 	Lpid                          // add in the pid to the output
+	Llevel                        // add in the output level "raw" string (eg: TRACE,DEBUG,..)
 	LstdFlags     = Ldate | Ltime // for those used to Go 'log' flag settings
 	LscreenFlags  = Ldate | Ltime // values for "std" screen and log file flags
-	LlogfileFlags = Lpid | Ldate | Ltime | Lmicroseconds | Lshortfile | Lshortfunc
+	LlogfileFlags = Lpid | Llevel | Ldate | Ltime | Lmicroseconds | Lshortfile | Lshortfunc
 )
 
 // Available output and logging levels to this package, by
@@ -143,12 +146,12 @@ const (
 )
 
 // Some API's require an indication of if we're adjusting the "screen" output
-// stream or the logfile output stream, use these bitflags anywhere you see
-// outputTgt arguments below.
+// stream or the logfile output stream, or both.  Use these flags as needed
+// to indicate which:
 const (
-	ForScreen  = 1 << iota              // Bit flag used to indicate screen target
-	ForLogfile                          // Used to indicate logfile target desired
-	ForBoth    = ForScreen | ForLogfile // indicate both as targets
+	ForScreen  = 1 << iota              // Used to indicate screen output target
+	ForLogfile                          // Indicates to control logfile target
+	ForBoth    = ForScreen | ForLogfile // indicate both screen/logfile targets
 )
 
 // These are primarily for inserting prefixes on printed strings so we can put
@@ -259,6 +262,14 @@ var (
 	// name (full path) followed by a dot and then the function name, this may
 	// be a bit short for some folks so adjust as needed.
 	LongFuncNameLength = 30
+
+	// CallDepth is for runtime.Caller() to identify where a Traceln or Printf
+	// or Issueln was called from (so meta-data dumped in "extended" modes
+	// gives the correct calling function and line number).  The existing
+	// value is correct *but* if you choose to further wrap 'out' methods in
+	// some extra method layer (or two) in your own modules then you might
+	// want to increase it via this public package global.
+	CallDepth = 5
 )
 
 // levelCheck insures valid log level "values" are provided
@@ -297,6 +308,47 @@ func SetThreshold(level Level, outputTgt int) {
 	if outputTgt&ForLogfile != 0 {
 		logThreshold = levelCheck(level)
 	}
+}
+
+// String implements a stringer for the Level type so we can print out string
+// representations for the level setting, these names map to the "code" names
+// for these settings (not the prefixes for the setting since some levels have
+// no output prefix by default).  Client still has full control over "primary"
+// out prefix separately from this, see SetPrefix and such.
+func (l Level) String() string {
+	lvl2String := map[Level]string{
+		LevelTrace:   "TRACE",
+		LevelDebug:   "DEBUG",
+		LevelVerbose: "VERBOSE",
+		LevelInfo:    "INFO",
+		LevelNote:    "NOTE",
+		LevelIssue:   "ISSUE",
+		LevelError:   "ERROR",
+		LevelFatal:   "FATAL",
+		LevelDiscard: "DISCARD",
+	}
+	l = levelCheck(l)
+	return lvl2String[l]
+}
+
+// LevelString2Level takes the string representation of a level and turns
+// it back into a Level type (integer type/iota)
+func LevelString2Level(s string) Level {
+	string2Lvl := map[string]Level{
+		"TRACE":   LevelTrace,
+		"DEBUG":   LevelDebug,
+		"VERBOSE": LevelVerbose,
+		"INFO":    LevelInfo,
+		"NOTE":    LevelNote,
+		"ISSUE":   LevelIssue,
+		"ERROR":   LevelError,
+		"FATAL":   LevelFatal,
+		"DISCARD": LevelDiscard,
+	}
+	if _, ok := string2Lvl[s]; !ok {
+		Fatalln("Invalid string level:", s, ", unable to map to Level type")
+	}
+	return string2Lvl[s]
 }
 
 // Prefix returns the current prefix for the given log level
@@ -373,7 +425,6 @@ func Flags(level Level, outputTgt int) int {
 // Note: Right now this sets *every* levels log flags to given value, and one
 // can give it out.ForScreen, out.ForLogfile or both or'd together although
 // usually one would want to give just one to adjust (screen or logfile)
-// FIXME: Feature: a bitmap would be more flexible than current levels
 func SetFlags(level Level, flags int, outputTgt int) {
 	for _, o := range outputters {
 		o.mu.Lock()
@@ -413,7 +464,6 @@ func Writer(level Level, outputTgt int) io.Writer {
 
 // SetWriter sets the screen and/or logfile output io.Writer for every log
 // level to the given writer
-// FIXME: Feature: a bitmap would be more flexible than current levels
 func SetWriter(level Level, w io.Writer, outputTgt int) {
 	for _, o := range outputters {
 		if level == LevelAll || o.level == level {
@@ -784,7 +834,7 @@ func getStackTrace(exitVal int) string {
 
 // InsertPrefix takes a multiline string (potentially) and for each
 // line places a string prefix in front of each line, for control
-// there is a bitmap of:
+// there are these settings:
 //   AlwaysInsert            // Prefix every line, regardless of output history
 //   SmartInsert             // Use previous output context to decide on prefix
 //   BlankInsert             // Only spaces inserted (same length as prefix)
@@ -890,14 +940,20 @@ func itoa(buf *[]byte, i int, wid int) {
 }
 
 // getFlagString takes the time the output func was called and tries
-// to construct a string to put in the log file (uses the flags bitmap
-// to decide what to print)
-func getFlagString(buf *[]byte, flags int, funcName string, file string, line int, t time.Time) string {
+// to construct a string to put in the log file (uses the flags settings
+// to decide what metadata to print, ie: one can "or" together different
+// flags to identify what should be dumped, like the Go 'log' package but
+// more flags are available, see top of file)
+func getFlagString(buf *[]byte, flags int, level Level, funcName string, file string, line int, t time.Time) string {
 	if flags&Lpid != 0 {
 		pid := os.Getpid()
 		*buf = append(*buf, '[')
 		itoa(buf, pid, 1)
 		*buf = append(*buf, "] "...)
+	}
+	if flags&Llevel != 0 {
+		lvl := fmt.Sprintf("%-8s", level)
+		*buf = append(*buf, lvl...)
 	}
 	if flags&(Ldate|Ltime|Lmicroseconds) != 0 {
 		if flags&Ldate != 0 {
@@ -946,7 +1002,7 @@ func getFlagString(buf *[]byte, flags int, funcName string, file string, line in
 			parts := strings.Split(funcName, ".")
 			var justFunc string
 			if len(parts) > 1 {
-				justFunc = parts[1]
+				justFunc = parts[len(parts)-1]
 			} else {
 				justFunc = "???"
 			}
@@ -972,22 +1028,24 @@ func getFlagString(buf *[]byte, flags int, funcName string, file string, line in
 }
 
 // determineFlags takes a set of flags defined in an env var (string) that
-// can be comma separated and turns them into a flags bitfield with the
-// desired settings, allows easy dynamic tweaking or addition of flags
-// in screen output for instance
+// can be comma separated and turns them into a real flags store type (int) with
+// the desired settings, allows easy dynamic tweaking or addition of flags in
+// screen output for instance
 func determineFlags(flagStr string) int {
 	flagStrs := strings.Split(flagStr, ",")
 	flags := 0
 	for _, currFlag := range flagStrs {
 		switch currFlag {
 		case "debug":
-			flags |= Ltime | Lmicroseconds | Lshortfile | Lshortfunc
+			flags |= Llevel | Ltime | Lmicroseconds | Lshortfile | Lshortfunc
 		case "all":
-			flags |= Lpid | Ldate | Ltime | Lmicroseconds | Lshortfile | Lshortfunc
+			flags |= Lpid | Llevel | Ldate | Ltime | Lmicroseconds | Lshortfile | Lshortfunc
 		case "longall":
-			flags |= Lpid | Ldate | Ltime | Lmicroseconds | Llongfile | Llongfunc
+			flags |= Lpid | Llevel | Ldate | Ltime | Lmicroseconds | Llongfile | Llongfunc
 		case "pid":
 			flags |= Lpid
+		case "level":
+			flags |= Llevel
 		case "date":
 			flags |= Ldate
 		case "time":
@@ -1025,6 +1083,7 @@ func (o *lvlOutput) insertFlagMetadata(s string, outputTgt int, ctrl int) (strin
 	var line int
 	var flags int
 	var supressOutput bool
+	var level Level
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	// if printing to the screen target use those flags, else use logfile flags
@@ -1034,12 +1093,14 @@ func (o *lvlOutput) insertFlagMetadata(s string, outputTgt int, ctrl int) (strin
 		} else {
 			flags = o.screenFlags
 		}
+		level = o.level
 	} else if outputTgt&ForLogfile != 0 {
 		if str := os.Getenv("PKG_OUT_LOGFILE_FLAGS"); str != "" {
 			flags = determineFlags(str)
 		} else {
 			flags = o.logFlags
 		}
+		level = o.level
 	} else {
 		Fatalln("Invalid target passed to insertFlagMetadata():", outputTgt)
 	}
@@ -1050,7 +1111,7 @@ func (o *lvlOutput) insertFlagMetadata(s string, outputTgt int, ctrl int) (strin
 		o.mu.Unlock()
 		var ok bool
 		var pc uintptr
-		pc, file, line, ok = runtime.Caller(5)
+		pc, file, line, ok = runtime.Caller(CallDepth)
 		if !ok {
 			file = "???"
 			line = 0
@@ -1065,7 +1126,7 @@ func (o *lvlOutput) insertFlagMetadata(s string, outputTgt int, ctrl int) (strin
 		}
 		o.mu.Lock()
 		// if the user has restricted debugging output to specific packages
-		// or methods (funcname might be "dvln/lib/out.MethodName" for example)
+		// or methods (funcname might be "github.com/dvln/out.MethodName")
 		// then we'll supress all debug output outside of the desired scope and
 		// only show those packages or methods of interest... simple substring
 		// match is done currently
@@ -1081,7 +1142,7 @@ func (o *lvlOutput) insertFlagMetadata(s string, outputTgt int, ctrl int) (strin
 		}
 	}
 	o.buf = o.buf[:0]
-	leader := getFlagString(&o.buf, flags, funcName, file, line, now)
+	leader := getFlagString(&o.buf, flags, level, funcName, file, line, now)
 	if leader == "" {
 		return s, supressOutput
 	}

@@ -24,7 +24,7 @@ import (
 	"os"
 	"testing"
 
-	"dvln/lib/3rd/testify/assert"
+	"github.com/stretchr/testify/assert"
 )
 
 // Example of more standard Go test infra usage (if removing assert)
