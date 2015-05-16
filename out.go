@@ -111,17 +111,17 @@ import (
 //   [LvlPrefix: ]<message>
 // See SetFlags() below for adjusting settings and Flags() to query settings.
 const (
-	Ldate         = 1 << iota     // the date: 2009/01/23
-	Ltime                         // the time: 01:23:23
-	Lmicroseconds                 // microsecond resolution: 01:23:23.123123.  assumes Ltime.
-	Llongfile                     // full file name path and line number: /a/b/c/d.go:23
-	Lshortfile                    // just src file name and line #, eg: d.go:23. overrides Llongfile
-	Llongfunc                     // full func signature, dvln/cmd.get for get method in dvln/cmd
-	Lshortfunc                    // just short func signature, trimmed to just get
-	Lpid                          // add in the pid to the output
-	Llevel                        // add in the output level "raw" string (eg: TRACE,DEBUG,..)
-	LstdFlags     = Ldate | Ltime // for those used to Go 'log' flag settings
-	LscreenFlags  = Ldate | Ltime // values for "std" screen and log file flags
+	Ldate         = 1 << iota             // the date: 2009/01/23
+	Ltime                                 // the time: 01:23:23
+	Lmicroseconds                         // microsecond resolution: 01:23:23.123123.  assumes Ltime.
+	Llongfile                             // full file name path and line number: /a/b/c/d.go:23
+	Lshortfile                            // just src file name and line #, eg: d.go:23. overrides Llongfile
+	Llongfunc                             // full func signature, dvln/cmd.get for get method in dvln/cmd
+	Lshortfunc                            // just short func signature, trimmed to just get
+	Lpid                                  // add in the pid to the output
+	Llevel                                // add in the output level "raw" string (eg: TRACE,DEBUG,..)
+	LstdFlags     = Ldate | Ltime         // for those used to Go 'log' flag settings
+	LscreenFlags  = Ltime | Lmicroseconds // values for "std" screen and log file flags
 	LlogfileFlags = Lpid | Llevel | Ldate | Ltime | Lmicroseconds | Lshortfile | Lshortfunc
 )
 
