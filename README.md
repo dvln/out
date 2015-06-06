@@ -401,7 +401,8 @@ Currently there's only a couple:
 
      "pid", "level", date", "time", "micro"|"microseconds", "file"|"shortfile",
      "longfile", "func"|"shortfunc", "longfunc" or "off".  Note that the
-     "off" setting turns all flags off and trumps everything else if used.```
+     "off" setting turns all flags off and trumps everything else if used.
+```
 
  * PKG_OUT_NONZERO_EXIT_STACKTRACE env set to "1" causes stacktraces to kick in
    for any non-zero exit done through this package (os.Exit() is not affected),
