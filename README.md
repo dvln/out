@@ -10,33 +10,19 @@ various other levels like out.Verboseln or out.Debugf or out.Fatal or out.Issue
 and various other levels).  One can also access an io.Writer for any output
 level (if needed).  For debug and trace (ie: trace = verbose debug) level
 output one can also control which package(s) or files have their debug info
-dumped (assuming debug output is active one can filter that by pkg/file also).
+dumped.  This reduces debug output to only those package(s) or file(s) or 
+function(s) as desired.
 
 I've written CLI tools in the past where I wanted greater control of where I
 send my output stream and how that stream might be dynamically "marked up",
 split/mirrored/redirected and/or filtered via leveling.  To be able to easily
-mirror screen output to a logfile or a buffer (or skip the screen entirely),
+mirror screen output to a logfile or buffer (or bypass the screen entirely),
 trivially, is powerful.  To be able to augment the screen or log file output,
 independently, with additional meta-data (pid, date/timestamp, file/func info,
 output level) and have all output remain cleanly aligned is very helpful for
 troubleshooting.  Additionally, giving tool owners (or clients) the ability
 to control what output "levels" are active and which pieces, if any, of add-on
-meta-data are visible, independently, to each output stream can be valuable.
-
-Example: user screen output set at a "normal level" while, at the same time,
-that same tool "run" is being transparently logged to a file with verbose
-debugging levels of output also being added there along with pid's/timestamps
-for each line of output identified, the output "log level" for each line of
-output, and even Go source filename/func/line# added to see where those output
-calls are coming from.  All of this can really add up in helping with
-troubleshooting as well as performance analysis and even visibility of user
-"setup" details.  For example, if your verbose debug output gives CLI info,
-env settings, cfg file settings, etc then one could reproduce the users cmds
-and setup and even timing if desired using that logfile data.  Another example:
-for testing I want to push screen output and logfile output into buffers I can
-easily check and test against, no "real" screen output needed but I want to
-verify that if the tool was really running exactly what was going to each
-target stream (see out_test.go).
+meta-data are visible independently to each output stream adds value.
 
 This started life as a wrapper around the Go standard 'log' library allowing two
 Loggers to be independently controlled (one typically writing to the screen and
@@ -56,7 +42,7 @@ meta-data and such.  Hence, this package was created with these goals in mind:
 7. Access to io.Writer for any output level (streams/markup based on curr setup)
 8. Clean alignment and handling for multi-line strings or strings w/no newlines
 9. "Smarter" insertion of newlines into the screen or log file io.Writers
-10. Ability to limit debug/trace output to specific pkg(s) and/or function(s)
+10. Ability to limit debug/trace output to specific pkg(s) or file(s) or function(s)
 11. Ability to easily add stack trace on non-zero exit (eg: Fatal*) class errors
 12. Attempts to be "safe" for concurrent use (currently lacks thorough testing)
 
@@ -69,7 +55,7 @@ Simply run calls to the output functions:
  * out.Trace\[f|ln\](...)  
  * out.Debug\[f|ln\](...)
  * out.Verbose\[f|ln\](...)
- * out.Print\[f|ln\](...) or out.Info\[f|ln\](...)              (identical)
+ * out.Info\[f|ln\](...) or out.Print\[f|ln\](...)              (identical)
  * out.Note\[f|ln\](...)
  * out.Issue\[f|ln\](...) or out.IssueExit\[f|ln\](exitVal, ..) (2nd form exits)
  * out.Error\[f|ln\](...) or out.ErrorExit\[f|ln\](exitVal, ..) (2nd form exits)
