@@ -384,32 +384,6 @@ Lets switch the io.Writer used for the screen so it goes into a byte buffer:
     ...
 ```
 
-### Use an io.Writer to dump output via the 'out' package
-
-Use an 'out' package io.Writer for the debug and standard parint levels so
-that we can leverage any of the many packages/functions that need a writer
-for output (TRACE, DEBUG, VERBOSE, INFO, NOTE, ISSUE, ERROR, FATAL are all
-available):
-
-```go
-    import (
-        "github.com/dvln/out"
-    )
-    fmt.Fprintf(out.DEBUG, "%s\n", someDebugString)
-    fmt.Fprintf(out.INFO, "%s\n", someNormalToolOutputString)
-    ...
-```
-
-The above is roughly the same as "out.Debugln(someDebugString)" followed
-by an "out.Infoln(someNormalToolOutputString)" call.  However, if one is
-using something like github.com/spf13/cobra for a CLI commander one can
-give it an io.Writer for any output so use of these 'out' package writers
-could come in handy for this or many other packages that take an io.Writer
-(or one could write to a buffer io.Writer and in the calling tool decide
-if it's normal or error output and then write at the correct output level
-which is what I would actually recommend so this example isn't the best
-frankly but there are many io.Writer uses regardless).
-
 ### Replace the log file outputs io.Writer so that instead goes into a buffer
 
 Another option: leave the screen alone and use the log file writer as a buffer:
@@ -435,6 +409,33 @@ Another option: leave the screen alone and use the log file writer as a buffer:
 	out.SetWriter(logfileBuf, out.ForLogfile)
     ...
 ```
+
+### Use an io.Writer for screen/logfile output (vs out.Print, out.Debug, etc)
+
+Use an 'out' package io.Writer for the debug and standard print levels so
+that we can leverage any of the many packages/functions that need a writer
+for output (available: TRACE, DEBUG, VERBOSE, INFO, NOTE, ISSUE, ERROR,
+and FATAL are all available io.Writer's in the 'out' package):
+
+```go
+    import (
+        "github.com/dvln/out"
+    )
+    fmt.Fprintf(out.DEBUG, "%s\n", someDebugString)
+    fmt.Fprintf(out.INFO, "%s\n", someNormalToolOutputString)
+    ...
+```
+
+The above is roughly the same as "out.Debugln(someDebugString)" followed
+by an "out.Infoln(someNormalToolOutputString)" call.  However, if one is
+using something like 'github.com/spf13/cobra' for a CLI commander one can
+give it an io.Writer for any output so use of these 'out' package writers
+could come in handy for this or many other packages that take an io.Writer
+(or one could write to a buffer io.Writer and in the calling tool decide
+if it's normal or error output and then write at the correct output level
+which is what I would actually recommend so this example isn't the best
+frankly but there are many io.Writer uses regardless).
+
 
 ## Environment settings
 Currently there's only a few:
