@@ -20,8 +20,10 @@ package out
 
 import (
 	"bytes"
+	"fmt"
 	"io/ioutil"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -61,7 +63,32 @@ func TestOutput(t *testing.T) {
 	Debug("debugging info")
 	Verbose("verbose info")
 	Info("information")
-	Note("key note")
+
+	// Here we'll test the io.Writer support.  Since our logfile output level is
+	// set to Note we can check a few things by dumping the note via io.Writer:
+	// a) that logBuf contains out_test.go and TestOutput for file/function
+	//    meaning that out caller(<depth>) is good for the io.Writer interface
+	//    (regular method calls are also tested in other test routines, right
+	//     now the same CallDepth of 5 seems good for both, nice)
+	// b) that the GetWriter() method is working to get a usable io.Writer
+	//    compatible structure
+	// c) that the other write mechanisms work in conjunction with the io.Writer
+	//    mechanism such that newline insertion and prefixing only happens once
+	//    across the various log levels (currently that's what we want)
+
+	n, err := fmt.Fprintf(NOTE, "%s", "key writer note ")
+	if err != nil {
+		t.Errorf("Error return from fmt.Fprintf() to NOTE should be nil, it isn't, io.Writer issues? (%d)", n)
+	}
+
+	// Now do a quick test of the method as well, and in doing so also
+	// test below that the prefix wasn't added between these two entries
+	noteWriter := GetWriter(LevelNote)
+	n, err = fmt.Fprintf(noteWriter, "%s", "key writer note ")
+	if err != nil {
+		t.Errorf("Error return from fmt.Fprintf() to noteWriter should be nil, it isn't, io.Writer issues? (%d)", n)
+	}
+
 	Issue("user issue")
 	Error("critical error")
 	os.Setenv("PKG_OUT_NO_EXIT", "1")
@@ -71,7 +98,7 @@ func TestOutput(t *testing.T) {
 	assert.NotContains(t, screenBuf.String(), "debugging info")
 	assert.NotContains(t, screenBuf.String(), "verbose info")
 	assert.Contains(t, screenBuf.String(), "information")
-	assert.Contains(t, screenBuf.String(), "key note")
+	assert.Contains(t, screenBuf.String(), "key writer note key writer note ")
 	assert.Contains(t, screenBuf.String(), "user issue")
 	assert.Contains(t, screenBuf.String(), "critical error")
 	assert.Contains(t, screenBuf.String(), "fatal error")
@@ -80,10 +107,16 @@ func TestOutput(t *testing.T) {
 	assert.NotContains(t, logBuf.String(), "debugging info")
 	assert.NotContains(t, logBuf.String(), "verbose info")
 	assert.NotContains(t, logBuf.String(), "information")
-	assert.Contains(t, logBuf.String(), "key note")
+	assert.Contains(t, logBuf.String(), "key writer note key writer note ")
 	assert.Contains(t, logBuf.String(), "user issue")
 	assert.Contains(t, logBuf.String(), "critical error")
 	assert.Contains(t, logBuf.String(), "fatal error")
+	assert.Contains(t, logBuf.String(), "out_test.go:")
+	assert.Contains(t, logBuf.String(), "TestOutput")
+	lines := strings.Split(logBuf.String(), "\n")
+	if len(lines) != 2 || (len(lines) == 2 && lines[1] != "") {
+		t.Errorf("Number of lines dumped (%d) was greater than the one CR terminated line expected\n  string: \"%s\"", len(lines), logBuf.String())
+	}
 }
 
 func TestOutputln(t *testing.T) {

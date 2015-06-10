@@ -35,7 +35,7 @@
 //
 // The 'out' package is designed as a singleton (currently) although one could
 // make it more generic... but as I have no need for that currently I've avoided
-// that effort.  If done maybe group []*lvlOutput in an "Outputter" struct, add
+// that effort.  If done maybe group []*LvlOutput in an "Outputter" struct, add
 // methods for all desired functions like 'out.Print()' on (*Outputter) and move
 // the logic into that and have the singleton function call these methods.  Then
 // perhaps clean up the *Newline stuff (could be done anyhow) so it drives off
@@ -158,7 +158,7 @@ const (
 // the prefix insert into different modes as needed, see doPrefixing() below.
 const (
 	AlwaysInsert  = 1 << iota // Prefix every line, regardless of output history
-	SmartInsert               // Use previous output context to decide on prefix
+	SmartInsert               // Output context "to now" decides if prefix used
 	BlankInsert               // Only spaces inserted (same length as prefix)
 	SkipFirstLine             // 1st line in multi-line string has no prefix
 )
@@ -166,12 +166,12 @@ const (
 // Level type is just an int, see related const enum with LevelTrace, ..
 type Level int
 
-// lvlOutput structures define io.Writers (one for screen and one for log) to
+// LvlOutput structures define io.Writers (one for screen and one for log) to
 // flexibly control outputting to a given output "level".  Each writer has a
 // set of flags associated indicating what augmentation the output might have
 // and there is a single, optional, prefix that will be inserted before any
 // message to that level (regardless of screen or logfile).  There are 8 levels
-// defined and placed into a array of lvlOutput pointers, []outputters.  Each
+// defined and placed into a array of LvlOutput pointers, []outputters.  Each
 // level output structures screen and log file writers can be individually
 // controlled (but would typically all point to stdout/stderr for the screen
 // target and the same log file writer or buffer writer for all logfile writers
@@ -182,7 +182,7 @@ type Level int
 // screen handles and such are "bootstrapped" below and can be controlled
 // via various methods to change writers, prefixes, overall threshold levels
 // and newline tracking, etc.
-type lvlOutput struct {
+type LvlOutput struct {
 	mu          sync.Mutex // ensures atomic writes; protects these fields:
 	level       Level      // below data tells how each logging level works
 	prefix      string     // prefix for this logging level (if any)
@@ -195,18 +195,27 @@ type lvlOutput struct {
 
 var (
 	// Set up each output level, ie: level, prefix, screen/log hndl, flags, ...
-	trace   = &lvlOutput{level: LevelTrace, prefix: "Trace: ", screenHndl: os.Stdout, screenFlags: LscreenFlags, logfileHndl: ioutil.Discard, logFlags: LlogfileFlags}
-	debug   = &lvlOutput{level: LevelDebug, prefix: "Debug: ", screenHndl: os.Stdout, screenFlags: LscreenFlags, logfileHndl: ioutil.Discard, logFlags: LlogfileFlags}
-	verbose = &lvlOutput{level: LevelVerbose, prefix: "", screenHndl: os.Stdout, screenFlags: 0, logfileHndl: ioutil.Discard, logFlags: LlogfileFlags}
-	info    = &lvlOutput{level: LevelInfo, prefix: "", screenHndl: os.Stdout, screenFlags: 0, logfileHndl: ioutil.Discard, logFlags: LlogfileFlags}
-	note    = &lvlOutput{level: LevelNote, prefix: "Note: ", screenHndl: os.Stdout, screenFlags: 0, logfileHndl: ioutil.Discard, logFlags: LlogfileFlags}
-	issue   = &lvlOutput{level: LevelIssue, prefix: "Issue: ", screenHndl: os.Stdout, screenFlags: 0, logfileHndl: ioutil.Discard, logFlags: LlogfileFlags}
-	err     = &lvlOutput{level: LevelError, prefix: "Error: ", screenHndl: os.Stderr, screenFlags: 0, logfileHndl: ioutil.Discard, logFlags: LlogfileFlags}
-	fatal   = &lvlOutput{level: LevelFatal, prefix: "Fatal: ", screenHndl: os.Stderr, screenFlags: 0, logfileHndl: ioutil.Discard, logFlags: LlogfileFlags}
 
-	// Set up all the lvlOutput level details in one array (except discard),
+	// TRACE can be used as an io.Writer for trace level output
+	TRACE = &LvlOutput{level: LevelTrace, prefix: "Trace: ", screenHndl: os.Stdout, screenFlags: LscreenFlags, logfileHndl: ioutil.Discard, logFlags: LlogfileFlags}
+	// DEBUG can be used as an io.Writer for debug level output
+	DEBUG = &LvlOutput{level: LevelDebug, prefix: "Debug: ", screenHndl: os.Stdout, screenFlags: LscreenFlags, logfileHndl: ioutil.Discard, logFlags: LlogfileFlags}
+	// VERBOSE can be used as an io.Writer for verbose level output
+	VERBOSE = &LvlOutput{level: LevelVerbose, prefix: "", screenHndl: os.Stdout, screenFlags: 0, logfileHndl: ioutil.Discard, logFlags: LlogfileFlags}
+	// INFO can be used as an io.Writer for info|print level output
+	INFO = &LvlOutput{level: LevelInfo, prefix: "", screenHndl: os.Stdout, screenFlags: 0, logfileHndl: ioutil.Discard, logFlags: LlogfileFlags}
+	// NOTE can be used as an io.Writer for note level output
+	NOTE = &LvlOutput{level: LevelNote, prefix: "Note: ", screenHndl: os.Stdout, screenFlags: 0, logfileHndl: ioutil.Discard, logFlags: LlogfileFlags}
+	// ISSUE can be used as an io.Writer for issue level output
+	ISSUE = &LvlOutput{level: LevelIssue, prefix: "Issue: ", screenHndl: os.Stdout, screenFlags: 0, logfileHndl: ioutil.Discard, logFlags: LlogfileFlags}
+	// ERR can be used as an io.Writer for error level output
+	ERR = &LvlOutput{level: LevelError, prefix: "Error: ", screenHndl: os.Stderr, screenFlags: 0, logfileHndl: ioutil.Discard, logFlags: LlogfileFlags}
+	// FATAL can be used as an io.Writer for fatal level output
+	FATAL = &LvlOutput{level: LevelFatal, prefix: "Fatal: ", screenHndl: os.Stderr, screenFlags: 0, logfileHndl: ioutil.Discard, logFlags: LlogfileFlags}
+
+	// Set up all the LvlOutput level details in one array (except discard),
 	// the idea that one can control these pretty flexibly (if needed)
-	outputters = []*lvlOutput{trace, debug, verbose, info, note, issue, err, fatal}
+	outputters = []*LvlOutput{TRACE, DEBUG, VERBOSE, INFO, NOTE, ISSUE, ERR, FATAL}
 
 	// Set up default/starting logging threshold settings, see SetThreshold()
 	// if you wish to change these threshold settings
@@ -263,9 +272,9 @@ var (
 	// be a bit short for some folks so adjust as needed.
 	LongFuncNameLength = 30
 
-	// CallDepth is for runtime.Caller() to identify where a Traceln or Printf
-	// or Issueln was called from (so meta-data dumped in "extended" modes
-	// gives the correct calling function and line number).  The existing
+	// CallDepth is for runtime.Caller() to identify where a Noteln() or Print()
+	// or Issuef() (etc) was called from (so meta-data dumped in "extended"
+	// mode gives the correct calling function and line number).  The existing
 	// value is correct *but* if you choose to further wrap 'out' methods in
 	// some extra method layer (or two) in your own modules then you might
 	// want to increase it via this public package global.
@@ -482,7 +491,7 @@ func SetWriter(level Level, w io.Writer, outputTgt int) {
 	}
 }
 
-// ResetNewline allows one to reset the screen and/or logfile lvlOutput so the
+// ResetNewline allows one to reset the screen and/or logfile LvlOutput so the
 // next bit of output either "thinks" (or doesn't) that the previous output put
 // the user on a new line.  If 'val' is true then the next output run through
 // this pkg to the given output stream can be prefixed (with timestamps, etc),
@@ -490,7 +499,7 @@ func SetWriter(level Level, w io.Writer, outputTgt int) {
 //   Note: enter data: <prompt>
 // Which leaves the output stream thinking the last msg had no newline at the
 // end of string.  Now, if one's input method reads input with the user hitting
-// a newline then the below call can be used to tell the lvlOutput(s) that a
+// a newline then the below call can be used to tell the LvlOutput(s) that a
 // newline was hit and any fresh output can be prefixed cleanly:
 //   out.ResetNewline(true, out.ForScreen|out.ForLogfile)
 // Note: for any *output* running through this module this is auto-handled
@@ -553,46 +562,46 @@ func UseTempLogFile(prefix string) string {
 // added and is by default prefixed with "Trace: <date/time> <msg>" for each
 // line but you can use flags and remove the timestamp, can also drop the prefix
 func Trace(v ...interface{}) {
-	trace.output(v...)
+	TRACE.output(v...)
 }
 
 // Debug is meant for basic debugging, space separate opts with no newline added
 // and is, by default, prefixed with "Debug: <date/time> <your msg>" for each
 // line but you can use flags and remove the timestamp, can also drop the prefix
 func Debug(v ...interface{}) {
-	debug.output(v...)
+	DEBUG.output(v...)
 }
 
 // Verbose meant for verbose user seen screen output, space separated
 // opts printed with no newline added, no output prefix is added by default
 func Verbose(v ...interface{}) {
-	verbose.output(v...)
+	VERBOSE.output(v...)
 }
 
 // Print is meant for "normal" user output, space separated opted
 // printed with no newline added, no output prefix is added by default
 func Print(v ...interface{}) {
-	info.output(v...)
+	INFO.output(v...)
 }
 
 // Info is the same as Print: meant for "normal" user output, space separated
 // opts printed with no newline added and no output prefix added by default
 func Info(v ...interface{}) {
-	info.output(v...)
+	INFO.output(v...)
 }
 
 // Note is meant for output of key "note" the user should pay attention to, opts
 // space separated and printed with no newline added, "Note: <msg>" prefix is
 // also added by default
 func Note(v ...interface{}) {
-	note.output(v...)
+	NOTE.output(v...)
 }
 
 // Issue is meant for "normal" user error output, space separated opts
 // printed with no newline added, "Issue: <msg>" prefix added by default,
 // if you want to exit after the issue is reported see IssueExit()
 func Issue(v ...interface{}) {
-	issue.output(v...)
+	ISSUE.output(v...)
 }
 
 // IssueExit is meant for "normal" user error output, space separated opts
@@ -600,8 +609,8 @@ func Issue(v ...interface{}) {
 // the "exit" form of this output routine results in os.Exit() being
 // called with the given exitVal (see Issue() if you do not want to exit)
 func IssueExit(exitVal int, v ...interface{}) {
-	issue.output(v...)
-	issue.exit(exitVal)
+	ISSUE.output(v...)
+	ISSUE.exit(exitVal)
 }
 
 // Error is meant for "unexpected"/system error output, space separated
@@ -610,7 +619,7 @@ func IssueExit(exitVal int, v ...interface{}) {
 // Note: by "unexpected" these are things like filesystem permissions
 // problems, see Issue for more normal user level usage issues
 func Error(v ...interface{}) {
-	err.output(v...)
+	ERR.output(v...)
 }
 
 // ErrorExit is meant for "unexpected"/system error output, space separated
@@ -620,15 +629,15 @@ func Error(v ...interface{}) {
 // Note: by "unexpected" these are things like filesystem permissions
 // problems, see Issue for more normal user level usage issues
 func ErrorExit(exitVal int, v ...interface{}) {
-	err.output(v...)
-	err.exit(exitVal)
+	ERR.output(v...)
+	ERR.exit(exitVal)
 }
 
 // Fatal is meant for "unexpected"/system fatal error output, space separated
 // opts printed with no newline added, "FATAL: <msg>" prefix added by default
 // and the tool will exit non-zero here
 func Fatal(v ...interface{}) {
-	fatal.output(v...)
+	FATAL.output(v...)
 }
 
 // Next we head into the <Level>ln() class methods which add newlines
@@ -638,41 +647,41 @@ func Fatal(v ...interface{}) {
 // added and is, by default, prefixed with "Trace: <your output>" for each line
 // but you can use flags and remove the timestamp, can also drop the prefix
 func Traceln(v ...interface{}) {
-	trace.outputln(v...)
+	TRACE.outputln(v...)
 }
 
 // Debugln is meant for basic debugging, space separate opts with newline added
 // and is, by default, prefixed with "Debug: <date/time> <yourmsg>" for each
 // line but you can use flags and remove the timestamp, can also drop the prefix
 func Debugln(v ...interface{}) {
-	debug.outputln(v...)
+	DEBUG.outputln(v...)
 }
 
 // Verboseln is meant for verbose user seen screen output, space separated
 // opts printed with newline added, no output prefix is added by default
 func Verboseln(v ...interface{}) {
-	verbose.outputln(v...)
+	VERBOSE.outputln(v...)
 }
 
 // Println is the same as Infoln: meant for "normal" user output, space
 // separated opts printed with newline added and no output prefix added by
 // default
 func Println(v ...interface{}) {
-	info.outputln(v...)
+	INFO.outputln(v...)
 }
 
 // Infoln is the same as Println: meant for "normal" user output, space
 // separated opts printed with newline added and no output prefix added by
 // default
 func Infoln(v ...interface{}) {
-	info.outputln(v...)
+	INFO.outputln(v...)
 }
 
 // Noteln is meant for output of key items the user should pay attention to,
 // opts are space separated and printed with a newline added, "Note: <msg>"
 // prefix is also added by default
 func Noteln(v ...interface{}) {
-	note.outputln(v...)
+	NOTE.outputln(v...)
 }
 
 // Issueln is meant for "normal" user error output, space separated
@@ -681,7 +690,7 @@ func Noteln(v ...interface{}) {
 // for unexpected errors use Errorln (eg: file system full, etc).  If you wish
 // to exit after your issue is printed please use IssueExitln() instead.
 func Issueln(v ...interface{}) {
-	issue.outputln(v...)
+	ISSUE.outputln(v...)
 }
 
 // IssueExitln is meant for "normal" user error output, space separated opts
@@ -691,8 +700,8 @@ func Issueln(v ...interface{}) {
 // routine honors PKG_OUT_NONZERO_EXIT_STACKTRACE env as well as the package
 // stacktrace setting via SetStacktraceOnExit(true), only if non-zero exitVal.
 func IssueExitln(exitVal int, v ...interface{}) {
-	issue.outputln(v...)
-	issue.exit(exitVal)
+	ISSUE.outputln(v...)
+	ISSUE.exit(exitVal)
 }
 
 // Errorln is meant for "unexpected"/system error output, space separated
@@ -700,7 +709,7 @@ func IssueExitln(exitVal int, v ...interface{}) {
 // Note: by "unexpected" these are things like filesystem permissions problems,
 // see Noteln/Issueln for more normal user level notes/usage
 func Errorln(v ...interface{}) {
-	err.outputln(v...)
+	ERR.outputln(v...)
 }
 
 // ErrorExitln is meant for "unexpected"/system error output, space separated
@@ -712,8 +721,8 @@ func Errorln(v ...interface{}) {
 // Note: by "unexpected" these are things like filesystem permissions
 // problems, see IssueExitln() for more normal user level usage issues
 func ErrorExitln(exitVal int, v ...interface{}) {
-	err.outputln(v...)
-	err.exit(exitVal)
+	ERR.outputln(v...)
+	ERR.exit(exitVal)
 }
 
 // Fatalln is meant for "unexpected"/system fatal error output, space separated
@@ -721,7 +730,7 @@ func ErrorExitln(exitVal int, v ...interface{}) {
 // and the tool will exit non-zero here.  Note that a stacktrace can be added
 // for fatal errors, see PKG_OUT_NONZERO_EXIT_STACKTRACE
 func Fatalln(v ...interface{}) {
-	fatal.outputln(v...)
+	FATAL.outputln(v...)
 }
 
 // Next we head into the <Level>f() class methods which take a standard
@@ -731,45 +740,45 @@ func Fatalln(v ...interface{}) {
 // output is, by default, prefixed with "Trace: <date/time> <your msg>" for each
 // line but you can use flags and remove the timestamp, can also drop the prefix
 func Tracef(format string, v ...interface{}) {
-	trace.outputf(format, v...)
+	TRACE.outputf(format, v...)
 }
 
 // Debugf is meant for basic debugging, format string followed by args and
 // output is by default prefixed with "Debug: <date/time> <your msg>" for each
 // line but you can use flags and remove the timestamp, can also drop the prefix
 func Debugf(format string, v ...interface{}) {
-	debug.outputf(format, v...)
+	DEBUG.outputf(format, v...)
 }
 
 // Verbosef is meant for verbose user seen screen output, format string
 // followed by args (and no output prefix is added by default)
 func Verbosef(format string, v ...interface{}) {
-	verbose.outputf(format, v...)
+	VERBOSE.outputf(format, v...)
 }
 
 // Printf is the same as Infoln: meant for "normal" user output, format string
 // followed by args (and no output prefix added by default)
 func Printf(format string, v ...interface{}) {
-	info.outputf(format, v...)
+	INFO.outputf(format, v...)
 }
 
 // Infof is the same as Printf: meant for "normal" user output, format string
 // followed by args (and no output prefix added by default)
 func Infof(format string, v ...interface{}) {
-	info.outputf(format, v...)
+	INFO.outputf(format, v...)
 }
 
 // Notef is meant for output of key "note" the user should pay attention to,
 // format string followed by args, "Note: <yourmsg>" prefixed by default
 func Notef(format string, v ...interface{}) {
-	note.outputf(format, v...)
+	NOTE.outputf(format, v...)
 }
 
 // Issuef is meant for "normal" user error output, format string followed
 // by args, prefix "Issue: <msg>" added by default.  If you want to exit
 // after your issue see IssueExitf() instead.
 func Issuef(format string, v ...interface{}) {
-	issue.outputf(format, v...)
+	ISSUE.outputf(format, v...)
 }
 
 // IssueExitf is meant for "normal" user error output, format string followed
@@ -777,8 +786,8 @@ func Issuef(format string, v ...interface{}) {
 // output routine results in os.Exit() being called with the given exitVal.
 // If you do not want to exit then see Issuef() instead
 func IssueExitf(exitVal int, format string, v ...interface{}) {
-	issue.outputf(format, v...)
-	issue.exit(exitVal)
+	ISSUE.outputf(format, v...)
+	ISSUE.exit(exitVal)
 }
 
 // Errorf is meant for "unexpected"/system error output, format string
@@ -786,28 +795,28 @@ func IssueExitf(exitVal int, format string, v ...interface{}) {
 // Note: by "unexpected" these are things like filesystem permissions problems,
 // see Notef/Issuef for more normal user level notes/usage
 func Errorf(format string, v ...interface{}) {
-	err.outputf(format, v...)
+	ERR.outputf(format, v...)
 }
 
 // ErrorExitf is meant for "unexpected"/system error output, format string
 // followed by args, prefix "ERROR: <msg>" added by default, the "exit" form
 // of this output routine results in os.Exit() being called with given exitVal
 func ErrorExitf(exitVal int, format string, v ...interface{}) {
-	err.outputf(format, v...)
-	err.exit(exitVal)
+	ERR.outputf(format, v...)
+	ERR.exit(exitVal)
 }
 
 // Fatalf is meant for "unexpected"/system fatal error output, format string
 // followed by args, prefix "FATAL: <msg>" added by default and will exit
 // non-zero from the tool (see Go 'log' Fatalf() method)
 func Fatalf(format string, v ...interface{}) {
-	fatal.outputf(format, v...)
+	FATAL.outputf(format, v...)
 }
 
 // Exit is meant for terminating without messaging but supporting stack trace
 // dump settings and such if non-zero exit.
 func Exit(exitVal int) {
-	fatal.exit(exitVal)
+	FATAL.exit(exitVal)
 }
 
 // SetStacktraceOnExit can be used to flip on stack traces programatically, one
@@ -868,36 +877,48 @@ func InsertPrefix(s string, prefix string, ctrl int) string {
 
 // output is similar to fmt.Print(), it'll space separate args with no newline
 // and output them to the screen and/or log file loggers based on levels
-func (o *lvlOutput) output(v ...interface{}) {
+func (o *LvlOutput) output(v ...interface{}) {
 	// set up the message to dump
 	msg := fmt.Sprint(v...)
 	// dump it based on screen and log output levels
-	o.stringOutput(msg)
+	_, err := o.stringOutput(msg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s", err)
+		os.Exit(-1)
+	}
 }
 
 // outputln is similar to fmt.Println(), it'll space separate args with no newline
 // and output them to the screen and/or log file loggers based on levels
-func (o *lvlOutput) outputln(v ...interface{}) {
+func (o *LvlOutput) outputln(v ...interface{}) {
 	// set up the message to dump
 	msg := fmt.Sprintln(v...)
 	// dump it based on screen and log output levels
-	o.stringOutput(msg)
+	_, err := o.stringOutput(msg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s", err)
+		os.Exit(-1)
+	}
 }
 
 // outputf is similar to fmt.Printf(), it takes a format and args and outputs
 // the resulting string to the screen and/or log file loggers based on levels
-func (o *lvlOutput) outputf(format string, v ...interface{}) {
+func (o *LvlOutput) outputf(format string, v ...interface{}) {
 	// set up the message to dump
 	msg := fmt.Sprintf(format, v...)
 	// dump it based on screen and log output levels
-	o.stringOutput(msg)
+	_, err := o.stringOutput(msg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s", err)
+		os.Exit(-1)
+	}
 }
 
 // exit will use os.Exit() to bail with the given exitVal, if
 // that exitVal is non-zero and a stracktrace is set up it will
 // dump that stacktrace as well (honoring all log levels and such),
 // see getStackTrace() for the env and package settings honored.
-func (o *lvlOutput) exit(exitVal int) {
+func (o *LvlOutput) exit(exitVal int) {
 	// get the stacktrace if it's configured
 	stacktrace := getStackTrace(exitVal)
 	if stacktrace != "" && o.level >= screenThreshold && o.level != LevelDiscard {
@@ -1076,7 +1097,7 @@ func determineFlags(flagStr string) int {
 // it will also return a boolean to indicate if the output should be supressed
 // or not (typically not but one can filter debug/trace output and if one has
 // set PKG_OUT_DEBUG_SCOPE, see env var elsewhere in this pkg for doc)
-func (o *lvlOutput) insertFlagMetadata(s string, outputTgt int, ctrl int) (string, bool) {
+func (o *LvlOutput) insertFlagMetadata(s string, outputTgt int, ctrl int) (string, bool) {
 	now := time.Now() // do this before Caller below, can take some time
 	var file string
 	var funcName string
@@ -1199,7 +1220,7 @@ func (o *lvlOutput) insertFlagMetadata(s string, outputTgt int, ctrl int) (strin
 //   <date/time> myfile.go:37: FATAL: <multiline stacktrace here>
 // The goal being readability of the screen and logfile output while conveying
 // information about date/time and source of the fatal error and such
-func (o *lvlOutput) doPrefixing(s string, outputTgt int, ctrl int) (string, bool) {
+func (o *LvlOutput) doPrefixing(s string, outputTgt int, ctrl int) (string, bool) {
 	// where we check out if we previously had no newline and if so the
 	// first line (if multiline) will not have the prefix, see example
 	// in function header around username
@@ -1228,21 +1249,28 @@ func (o *lvlOutput) doPrefixing(s string, outputTgt int, ctrl int) (string, bool
 
 // stringOutput uses existing screen and log levels to decide what, if
 // anything, is printed to the screen and/or log file Writer(s) based on
-// current screen and log output thresholds, flags and stack trace settings
-func (o *lvlOutput) stringOutput(s string) {
-	// print to the screen output writer first
+// current screen and log output thresholds, flags and stack trace settings.
+// It returns the length of output written (to *both* screen and logfile targets
+// if it succeeds... and note that the length will include additional meta-data
+// that the user has requested be added) and an error if one occurred.
+func (o *LvlOutput) stringOutput(s string) (int, error) {
+	// print to the screen output writer first...
 	var stacktrace string
 	if o.level == LevelFatal {
 		stacktrace = getStackTrace(1)
 	}
 	var err error
+	var n int
+	var screenLength int
+	var logfileLength int
 	if o.level >= screenThreshold && o.level != LevelDiscard {
 		pfxScreenStr, supressOutput := o.doPrefixing(s, ForScreen, SmartInsert)
 		if !supressOutput && s != "" {
-			_, err = o.screenHndl.Write([]byte(pfxScreenStr))
+			n, err = o.screenHndl.Write([]byte(pfxScreenStr))
+			screenLength += n
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "%sError writing to screen output handler:\n%+v\noutput:\n%s\n", o.prefix, err, s)
-				os.Exit(1)
+				myerr := fmt.Errorf("%sError writing to screen output handler:\n%+v\noutput:\n%s\n", o.prefix, err, s)
+				return screenLength, myerr
 			}
 			if s[len(s)-1] == 0x0A { // if last char is a newline..
 				screenNewline = true
@@ -1253,14 +1281,20 @@ func (o *lvlOutput) stringOutput(s string) {
 		if o.level == LevelFatal {
 			if !screenNewline {
 				// ignore errors, just quick "prettyup" attempt:
-				o.screenHndl.Write([]byte("\n"))
+				n, err = o.screenHndl.Write([]byte("\n"))
+				screenLength += n
+				if err != nil {
+					myerr := fmt.Errorf("%sError writing newline to screen output handler:\n%+v\n", o.prefix, err)
+					return screenLength, myerr
+				}
 			}
 			pfxScreenStr, _ = o.doPrefixing(stacktrace, ForScreen, SmartInsert)
 			// don't need to check supressOutput, possible for debug/trace only
-			_, err = o.screenHndl.Write([]byte(pfxScreenStr))
+			n, err = o.screenHndl.Write([]byte(pfxScreenStr))
+			screenLength += n
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "%sError writing stacktrace to screen output handle:\n%+v\n", o.prefix, err)
-				os.Exit(1)
+				myerr := fmt.Errorf("%sError writing stacktrace to screen output handle:\n%+v\n", o.prefix, err)
+				return screenLength, myerr
 			}
 		}
 	}
@@ -1269,7 +1303,12 @@ func (o *lvlOutput) stringOutput(s string) {
 	if o.level >= logThreshold && o.level != LevelDiscard {
 		pfxLogfileStr, supressOutput := o.doPrefixing(s, ForLogfile, SmartInsert)
 		if !supressOutput && s != "" {
-			o.logfileHndl.Write([]byte(pfxLogfileStr))
+			n, err = o.logfileHndl.Write([]byte(pfxLogfileStr))
+			logfileLength += n
+			if err != nil {
+				myerr := fmt.Errorf("%sError writing to logfile output handler:\n%+v\noutput:\n%s\n", o.prefix, err, s)
+				return logfileLength, myerr
+			}
 			if s[len(s)-1] == 0x0A {
 				logfileNewline = true
 			} else {
@@ -1279,10 +1318,19 @@ func (o *lvlOutput) stringOutput(s string) {
 		if o.level == LevelFatal {
 			if !logfileNewline {
 				o.logfileHndl.Write([]byte("\n"))
+				logfileLength += n
+				if err != nil {
+					myerr := fmt.Errorf("%sError writing newline to screen output handler:\n%+v\n", o.prefix, err)
+					return logfileLength, myerr
+				}
 			}
 			pfxLogfileStr, _ = o.doPrefixing(stacktrace, ForLogfile, SmartInsert)
-			// don't need to check supressOutput, possible for debug/trace only
-			o.logfileHndl.Write([]byte(pfxLogfileStr))
+			n, err = o.logfileHndl.Write([]byte(pfxLogfileStr))
+			logfileLength += n
+			if err != nil {
+				myerr := fmt.Errorf("%sError writing stacktrace to logfile output handle:\n%+v\n", o.prefix, err)
+				return logfileLength, myerr
+			}
 		}
 	}
 	// if we're fatal erroring then we need to exit unless overrides in play,
@@ -1291,4 +1339,57 @@ func (o *lvlOutput) stringOutput(s string) {
 		os.Getenv("PKG_OUT_NO_EXIT") != "1" {
 		os.Exit(1)
 	}
+	// if all good return all the bytes we wrote to *both* targets and nil err
+	return logfileLength + screenLength, nil
+}
+
+// GetWriter will return an io.Writer compatible structure for the desired
+// output level.  It's a bit cheesy but does the trick if you want an
+// io.Writer at a given level.  Typically one would not use this and
+// would instead just pass in out.TRACE, out.DEBUG, out.VERBOSE, out.INFO,
+// out.NOTE, out.ISSUE, out.ERROR or out.FATAL directly as the io.Writer
+// to write at a given output level (but if you have a Level type and
+// want to get the associated io.Writer you can use this method)
+func GetWriter(l Level) *LvlOutput {
+	var writeLevel *LvlOutput
+	l = levelCheck(l)
+	switch l {
+	case LevelTrace:
+		writeLevel = TRACE
+	case LevelDebug:
+		writeLevel = DEBUG
+	case LevelVerbose:
+		writeLevel = VERBOSE
+	case LevelInfo:
+		writeLevel = INFO
+	case LevelNote:
+		writeLevel = NOTE
+	case LevelIssue:
+		writeLevel = ISSUE
+	case LevelError:
+		writeLevel = ERR
+	case LevelFatal:
+		writeLevel = FATAL
+	default:
+		writeLevel = INFO
+	}
+	return writeLevel
+}
+
+// Write implements an io.Writer interface for any of the available output
+// levels.  Use GetWriter() above to grab a *LvlOutput structure for the
+// desired output level... so, if you want the "standard" info (print) output
+// level then one might do this:
+//   infoWriter := out.GetWriter(out.LevelInfo)
+//   fmt.Fprintf(infoWriter, "%s\n", stringVar)
+// The above example would print to the screen and any logfile that was set up
+// just like the Info[ln|f]() (or the Print[ln|f]()) routine would.  Keep in
+// mind that if a logfile has been activated this io.Writer will behave somewhat
+// like an io.MultiWriter (writing to multiple target handles potentially, the
+// difference being that here the different target handles can be augmented with
+// independently controlled levels of additional meta-data, independent output
+// levels for each target handle, etc (and one could combine this io.Writer with
+// additional writers itself via io.MultiWriter even, crazy fun)
+func (o *LvlOutput) Write(p []byte) (n int, err error) {
+	return o.stringOutput(string(p))
 }
