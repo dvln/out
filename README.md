@@ -9,9 +9,9 @@ become out.Println, out.Print and out.Printf with ability to also output at
 various other levels like out.Verboseln or out.Debugf or out.Fatal or out.Issue
 and various other levels).  One can also access an io.Writer for any output
 level (if needed).  For debug and trace (ie: trace = verbose debug) level
-output one can also control which package(s) or files have their debug info
-dumped.  This reduces debug output to only those package(s) or file(s) or 
-function(s) as desired.
+output one can also control which package(s) or function(s) have their debug
+info dumped.  This reduces debug output to only those areas of code one wishes
+to focus on (if desired).
 
 I've written CLI tools in the past where I wanted greater control of where I
 send my output stream and how that stream might be dynamically "marked up",
@@ -42,8 +42,8 @@ meta-data and such.  Hence, this package was created with these goals in mind:
 7. Access to io.Writer for any output level (streams/markup based on curr setup)
 8. Clean alignment and handling for multi-line strings or strings w/no newlines
 9. "Smarter" insertion of newlines into the screen or log file io.Writers
-10. Ability to limit debug/trace output to specific pkg(s) or file(s) or function(s)
-11. Ability to easily add stack trace on non-zero exit (eg: Fatal*) class errors
+10. Ability to limit debug/trace output to specific pkg(s) or function(s)
+11. Ability to easily add stack trace on non-zero exit (eg: Fatal) class errors
 12. Attempts to be "safe" for concurrent use (currently lacks thorough testing)
 
 # Usage
