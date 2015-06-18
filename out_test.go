@@ -26,7 +26,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/dvln/testify/assert"
 )
 
 // Example of more standard Go test infra usage (if removing assert)
