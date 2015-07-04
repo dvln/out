@@ -884,7 +884,9 @@ func (o *LvlOutput) output(v ...interface{}) {
 	_, err := o.stringOutput(msg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s", err)
-		os.Exit(-1)
+		if os.Getenv("PKG_OUT_NO_EXIT") != "1" {
+			os.Exit(-1)
+		}
 	}
 }
 
@@ -897,7 +899,9 @@ func (o *LvlOutput) outputln(v ...interface{}) {
 	_, err := o.stringOutput(msg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s", err)
-		os.Exit(-1)
+		if os.Getenv("PKG_OUT_NO_EXIT") != "1" {
+			os.Exit(-1)
+		}
 	}
 }
 
@@ -910,7 +914,9 @@ func (o *LvlOutput) outputf(format string, v ...interface{}) {
 	_, err := o.stringOutput(msg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s", err)
-		os.Exit(-1)
+		if os.Getenv("PKG_OUT_NO_EXIT") != "1" {
+			os.Exit(-1)
+		}
 	}
 }
 
@@ -927,7 +933,9 @@ func (o *LvlOutput) exit(exitVal int) {
 			_, err := o.screenHndl.Write([]byte(msg))
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%sError writing stacktrace to screen output handle:\n%+v\n", o.prefix, err)
-				os.Exit(1)
+				if os.Getenv("PKG_OUT_NO_EXIT") != "1" {
+					os.Exit(1)
+				}
 			}
 		}
 	}
@@ -937,7 +945,9 @@ func (o *LvlOutput) exit(exitVal int) {
 			o.logfileHndl.Write([]byte(msg))
 		}
 	}
-	os.Exit(exitVal)
+	if os.Getenv("PKG_OUT_NO_EXIT") != "1" {
+		os.Exit(exitVal)
+	}
 }
 
 // iota converts an int to fixed-width decimal ASCII.  Give a negative width to
