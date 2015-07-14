@@ -166,13 +166,13 @@ const (
 // Level type is just an int, see related const enum with LevelTrace, ..
 type Level int
 
-// LvlOutput structures define io.Writers (one for screen and one for log) to
+// LvlOutput structures define io.Writers (eg: one for screen, one for log) to
 // flexibly control outputting to a given output "level".  Each writer has a
 // set of flags associated indicating what augmentation the output might have
 // and there is a single, optional, prefix that will be inserted before any
 // message to that level (regardless of screen or logfile).  There are 8 levels
 // defined and placed into a array of LvlOutput pointers, []outputters.  Each
-// level output structures screen and log file writers can be individually
+// levels output struct screen and log file writers can be individually
 // controlled (but would typically all point to stdout/stderr for the screen
 // target and the same log file writer or buffer writer for all logfile writers
 // for each level... but don't have to).  The log file levels provided are
@@ -181,7 +181,9 @@ type Level int
 // Trace[f|ln](), Debug[f|ln](), Verbose[f|ln](), etc.  All prefixes and
 // screen handles and such are "bootstrapped" below and can be controlled
 // via various methods to change writers, prefixes, overall threshold levels
-// and newline tracking, etc.
+// and newline tracking, etc.  Aside: below there is a also an io.Writer that
+// corresponds to each level, ie: fmt.Fprintf(TRACE, "%s", someStr), as a 2nd
+// way to push output through the screen/log writers that are set up.
 type LvlOutput struct {
 	mu          sync.Mutex // ensures atomic writes; protects these fields:
 	level       Level      // below data tells how each logging level works
@@ -950,7 +952,7 @@ func (o *LvlOutput) exit(exitVal int) {
 	}
 }
 
-// iota converts an int to fixed-width decimal ASCII.  Give a negative width to
+// itoa converts an int to fixed-width decimal ASCII.  Give a negative width to
 // avoid zero-padding.  Knows the buffer has capacity.  Taken from Go's 'log'
 // pkg since we want some of the same formatting.
 func itoa(buf *[]byte, i int, wid int) {
