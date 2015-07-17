@@ -11,7 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package out is for easy and flexible CLI output and log handling.  Goals:
+// Package out is for easy and flexible CLI output and log handling.  It has
+// taken ideas from the Go author log package, spf13's jwalterweatherman package,
+// Dropbox errors package and other packages out there (many thanks to all the
+// talented folks!!!).  Goals of this pkg:
 //
 // - Leveled output: trace, debug, verbose, print, note, issue, error, fatal
 //
@@ -30,6 +33,14 @@
 // Go's 'log' pkg)
 //
 // - Non-zero exits can be marked up with a stack trace easily (via env or api)
+//
+// - Future (partially done, don't use yet): extended errors with smart stack
+// tracing, error codes (optional/extensible), error "stacking/wrapping" with
+// intelligent "constant error" matching
+//
+// - Future: Support custom formatters if existing formatting options are not
+// desirable, this could be used to dump errors in different formats (eg:
+// adjust output if tool running in text or JSON mode for example)
 //
 // - Future: github.com/dvln/in for prompting/paging, to work w/this package
 //
@@ -91,6 +102,7 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -195,6 +207,45 @@ type LvlOutput struct {
 	logFlags    int        // flags: additional metadata on logfile output
 }
 
+// DetailedError (interface) exposes additional information about a BaseError.
+// One does not need to use such errors to use the 'out' package (at all) but
+// by doing so one can perhaps have more detailed error information available
+// for clients (or admin troubleshooting) if preferred.  This allows errors
+// to be stacked, stack traces to be stashed, etc.  Basically this interface
+// exposes details about 'out' package errors (& implements Go error interface).
+type DetailedError interface {
+	// This returns the error message without the stack trace.
+	GetMessage() string
+
+	// This returns the stack trace without the error message.
+	GetStack() string
+
+	// This returns the stack trace's context
+	GetContext() string
+
+	// This returns the stack trace without the error message.
+	GetCode() int
+
+	// This returns the wrapped error.  This returns nil if this does not wrap
+	// another error.
+	GetInner() error
+
+	// Implements the Go built-in error interface.
+	Error() string
+}
+
+// BaseError can be used for fancier errors for your tool, this package will
+// take advantage of such errors when formatting errors and such but there
+// is no harm in not using these.
+type BaseError struct {
+	Msg     string
+	Err     error
+	Code    int
+	Stack   string
+	Context string
+	inner   error
+}
+
 var (
 	// Set up each output level, ie: level, prefix, screen/log hndl, flags, ...
 
@@ -281,6 +332,14 @@ var (
 	// some extra method layer (or two) in your own modules then you might
 	// want to increase it via this public package global.
 	CallDepth = 5
+
+	// DefaultErrCode ties into assigning an error code to all errors so if
+	// you aren't using codes (or haven't set them in some err scenarios, which
+	// can be normal unless you're applying codes to and wrapping all errors
+	// which is unlikely).  Anyhow, the pkg will use this default error code
+	// for any error that has no code (mostly internal, if this is an errors
+	// code it will not be shown typically)
+	DefaultErrCode = 100
 )
 
 // levelCheck insures valid log level "values" are provided
@@ -833,12 +892,8 @@ func SetStacktraceOnExit(val bool) {
 func getStackTrace(exitVal int) string {
 	var myStack string
 	if exitVal != 0 && (stacktraceOnExit || os.Getenv("PKG_OUT_NONZERO_EXIT_STACKTRACE") == "1") {
-		trace := make([]byte, 4096)
-		count := runtime.Stack(trace, true)
-		// trace will be populated with NUL chars for anything not filled in,
-		// Go isn't C so we need to trim those out otherwise they'll be printed
-		trace = bytes.Trim(trace, "\x00")
-		myStack = fmt.Sprintf("stacktrace: stack of %d bytes:\n%s\n", count, trace)
+		trace, _ := stackTrace(CallDepth)
+		myStack = fmt.Sprintf("Stacktrace:\n%s", trace)
 	}
 	return myStack
 }
@@ -1269,7 +1324,7 @@ func (o *LvlOutput) stringOutput(s string) (int, error) {
 	// print to the screen output writer first...
 	var stacktrace string
 	if o.level == LevelFatal {
-		stacktrace = getStackTrace(1)
+		stacktrace = getStackTrace(-1)
 	}
 	var err error
 	var n int
@@ -1278,6 +1333,38 @@ func (o *LvlOutput) stringOutput(s string) (int, error) {
 	if o.level >= screenThreshold && o.level != LevelDiscard {
 		pfxScreenStr, supressOutput := o.doPrefixing(s, ForScreen, SmartInsert)
 		if !supressOutput && s != "" {
+			//FIXME: erik: now that we have error codes (always) we need to
+			//    set up an optional formatter interface which dvln can
+			//    register... for JSON.  Should allow for non-terminal and
+			//    terminal formatters for both screen and logfile (terminal
+			//    only applies to ISSUE w/exit, ERROR w/exit or FATAL).  Using
+			//    that the terminal ones would convert the msg to a JSON error
+			//    (with msg, level and msg code), return that and it would be
+			//    dumped here.  For non-terminal the formatter would do this:
+			//    a) use an 'api' pkg API to store the warning in JSON w/msg,
+			//       level, msg code (if DetailedError the msg would be
+			//       potentially multi-line, might have stacktrace as well
+			//       if that is active for msgs)
+			//    b) indicate to this method NOT to dump any output
+			//
+			//    Question: for the codes, should error and regular msg
+			//       codes come in the same context so DetailedError could
+			//       become DetailedMsg instead (and be used for errs or Msgs,
+			//       should Msgs allow "nesting" like errors with diff codes
+			//       and the same logic to use the most outer code?)
+			//
+			//     Consider: stack trace handling should be smarter if it's
+			//       a DetailedError, use the same logic used by Error() on
+			//       that type to get the "lowest" stack trace possible which
+			//       will already be in the messages (and if not available or
+			//       regular errors then we'll use existing functionality).
+			//       Also need to consider stack traces on exit, non-exit...
+			//       should we support stack traces:
+			//       - only on non-zero exit issues/errors/fatal
+			//       - on any issues/errors/fatal
+			//       - both of the above, configurable (likely), default is ???
+			//       - on message at all (probably not, too costly)
+
 			n, err = o.screenHndl.Write([]byte(pfxScreenStr))
 			screenLength += n
 			if err != nil {
@@ -1349,7 +1436,7 @@ func (o *LvlOutput) stringOutput(s string) (int, error) {
 	// this env var should be used for test suites only really...
 	if o.level == LevelFatal &&
 		os.Getenv("PKG_OUT_NO_EXIT") != "1" {
-		os.Exit(1)
+		os.Exit(-1)
 	}
 	// if all good return all the bytes we wrote to *both* targets and nil err
 	return logfileLength + screenLength, nil
@@ -1404,4 +1491,379 @@ func GetWriter(l Level) *LvlOutput {
 // additional writers itself via io.MultiWriter even, crazy fun)
 func (o *LvlOutput) Write(p []byte) (n int, err error) {
 	return o.stringOutput(string(p))
+}
+
+// GetMessage returns the error string without stack trace information, note
+// that this will recurse across all nested errors whereas the use of something
+// like "detErr.GetMessage()" would only return the message *in* that one error
+// even if it was part of a set of nested/inner errors.
+func GetMessage(err interface{}) string {
+	switch e := err.(type) {
+	case DetailedError:
+		detErr := DetailedError(e)
+		ret := []string{}
+		for detErr != nil {
+			ret = append(ret, detErr.GetMessage())
+			i := detErr.GetInner()
+			if i == nil {
+				break
+			}
+			var ok bool
+			detErr, ok = i.(DetailedError)
+			if !ok {
+				ret = append(ret, i.Error())
+				break
+			}
+		}
+		return strings.Join(ret, "\n")
+	case runtime.Error:
+		return runtime.Error(e).Error()
+	case error:
+		return e.Error()
+	default:
+		return "Passed a non-error to GetMessage"
+	}
+}
+
+// GetCode returns the errors code (if no code, ie: code=0, then the "default"
+// error code (100, as set in DefaultErrCode) will be returned.  This routine
+// will recurse across all nested/inner errors, the basics:
+// a) the "most outer" code that is not 0 or DefaultErrCode (if 3 nested errors
+// and the middle is set to 209 and the rest aren't set, ie: 0 or DefaultErrCode
+// then 209 will be the err code returned)
+// b) if nothing is set then return the DefaultErrCode (typically 100)
+// This is different than "detErr.GetCode()" as that will get whatever code
+// is set for that specific error only (will not recurse inner errors/etc)
+func GetCode(err interface{}) int {
+	switch e := err.(type) {
+	case DetailedError:
+		detErr := DetailedError(e)
+		code := 0
+		for detErr != nil {
+			code = detErr.GetCode()
+			if code != 0 && code != DefaultErrCode {
+				break
+			}
+			i := detErr.GetInner()
+			if i == nil {
+				break
+			}
+			var ok bool
+			detErr, ok = i.(DetailedError)
+			if !ok {
+				break
+			}
+		}
+		if code == 0 {
+			code = DefaultErrCode
+		}
+		return code
+	default:
+		return DefaultErrCode
+	}
+}
+
+// Error returns a string with all available error information, including inner
+// errors that are wrapped by this errors.
+func (e *BaseError) Error() string {
+	return DefaultError(e)
+}
+
+// GetMessage returns the error message without the stack trace.  Note that
+// this will not recurse inner/nested errors at all, see "GetMessage(someErr)"
+// for that functionality (vs. this being called via "detErr.GetMessage()")
+func (e *BaseError) GetMessage() string {
+	return e.Msg
+}
+
+// GetStack returns the stack trace without the error message.
+func (e *BaseError) GetStack() string {
+	return e.Stack
+}
+
+// GetCode returns the code, if any, available in the given error... note that
+// this will not recurse inner/nested errors at all, see "GetCode(someErr)" for
+// that functionality (vs. this being called via "detErr.GetCode()")
+func (e *BaseError) GetCode() int {
+	if e.Code == 0 {
+		e.Code = DefaultErrCode
+	}
+	return e.Code
+}
+
+// GetContext returns the stack trace's context.
+func (e *BaseError) GetContext() string {
+	return e.Context
+}
+
+// GetInner returns the wrapped error, if there is one.
+func (e *BaseError) GetInner() error {
+	return e.inner
+}
+
+// Err returns a new BaseError initialized with the given message and
+// the current stack trace.
+func Err(msg string, code ...int) DetailedError {
+	stack, context := StackTrace()
+	errNum := 0
+	if code != nil {
+		errNum = code[0]
+	}
+	return &BaseError{
+		Msg:     msg,
+		Code:    errNum,
+		Stack:   stack,
+		Context: context,
+	}
+}
+
+// Errf is the same as Err, but with fmt.Printf-style params and error
+// code # required
+func Errf(format string, code int, args ...interface{}) DetailedError {
+	stack, context := StackTrace()
+	return &BaseError{
+		Msg:     fmt.Sprintf(format, args...),
+		Code:    code,
+		Stack:   stack,
+		Context: context,
+	}
+}
+
+// WrapErr wraps another error in a new BaseError.
+func WrapErr(err error, msg string, code ...int) DetailedError {
+	stack, context := StackTrace()
+	errNum := 0
+	if code != nil {
+		errNum = code[0]
+	}
+	return &BaseError{
+		Msg:     msg,
+		Code:    errNum,
+		Stack:   stack,
+		Context: context,
+		inner:   err,
+	}
+}
+
+// WrapErrf is the same as WrapErr, but with fmt.Printf-style parameters and
+// a required error code #
+func WrapErrf(err error, code int, format string, args ...interface{}) DetailedError {
+	stack, context := StackTrace()
+	return &BaseError{
+		Msg:     fmt.Sprintf(format, args...),
+		Code:    code,
+		Stack:   stack,
+		Context: context,
+		inner:   err,
+	}
+}
+
+// DefaultError is a default implementation of the Error method of the detailed
+// error interface, see "(DetailedError) Error()" in this pkg.
+func DefaultError(e DetailedError) string {
+	// Find the "original" stack trace, which is probably the most helpful for
+	// debugging.
+	errLines := make([]string, 1)
+	var origStack string
+	code := GetCode(e)
+	errLines[0] = fmt.Sprintf("Error %d:", code)
+	fillErrorInfo(e, &errLines, &origStack)
+	errLines = append(errLines, "")
+	errLines = append(errLines, "Stacktrace:")
+	errLines = append(errLines, origStack)
+	return strings.Join(errLines, "\n")
+}
+
+// fillErrorInfo fills errLines with all error messages, and origStack with the
+// inner-most stack.
+func fillErrorInfo(err error, errLines *[]string, origStack *string) {
+	if err == nil {
+		return
+	}
+
+	derr, ok := err.(DetailedError)
+	if ok {
+		*errLines = append(*errLines, derr.GetMessage())
+		*origStack = derr.GetStack()
+		fillErrorInfo(derr.GetInner(), errLines, origStack)
+	} else {
+		*errLines = append(*errLines, err.Error())
+	}
+}
+
+// stackTrace returns a copy of the error with the stack trace field populated
+// and any other shared initialization; skips 'skip' levels of the stack trace.
+// The cleaned up "current" stack trace is returned as is anything that might
+// be visible after it as 'context'.  This was borrowed from Dropbox's open
+// 'errors' package and frankly I'm not clear as to if 'context' is ever
+// non-empty (based on stack traces I've seen and the parsing below I think
+// it will always be empty but I might be missing something)
+// NOTE: This can panic if any error (eg: runtime stack trace gathering issue)
+func stackTrace(skip int) (current, context string) {
+	// grow buf until it's large enough to store entire stack trace
+	buf := make([]byte, 128)
+	for {
+		n := runtime.Stack(buf, false)
+		if n < len(buf) {
+			buf = buf[:n]
+			break
+		}
+		buf = make([]byte, len(buf)*2)
+	}
+
+	// Returns the index of the first occurrence of '\n' in the buffer 'b'
+	// starting with index 'start'.
+	//
+	// In case no occurrence of '\n' is found, it returns len(b). This
+	// simplifies the logic on the calling sites.
+	indexNewline := func(b []byte, start int) int {
+		if start >= len(b) {
+			return len(b)
+		}
+		searchBuf := b[start:]
+		index := bytes.IndexByte(searchBuf, '\n')
+		if index == -1 {
+			return len(b)
+		}
+		return (start + index)
+	}
+
+	// Strip initial levels of stack trace, but keep header line that
+	// identifies the current goroutine.
+	var strippedBuf bytes.Buffer
+	index := indexNewline(buf, 0)
+	if index != -1 {
+		strippedBuf.Write(buf[:index])
+	}
+
+	// Skip lines.
+	for i := 0; i < skip; i++ {
+		index = indexNewline(buf, index+1)
+		index = indexNewline(buf, index+1)
+	}
+
+	isDone := false
+	startIndex := index
+	lastIndex := index
+	for !isDone {
+		index = indexNewline(buf, index+1)
+		if (index - lastIndex) <= 1 {
+			isDone = true
+		} else {
+			lastIndex = index
+		}
+	}
+	strippedBuf.Write(buf[startIndex:index])
+	return strippedBuf.String(), string(buf[index:])
+}
+
+// StackTrace returns the current stack trace string.  NOTE: the stack creation
+// code is excluded from the stack trace.
+func StackTrace() (current, context string) {
+	return stackTrace(3)
+}
+
+// unwrapError returns a wrapped error or nil if there is none.
+func unwrapError(ierr error) (nerr error) {
+	// Internal errors have a well defined bit of context.
+	if detErr, ok := ierr.(DetailedError); ok {
+		return detErr.GetInner()
+	}
+
+	// At this point, if anything goes wrong, just return nil.
+	defer func() {
+		if x := recover(); x != nil {
+			nerr = nil
+		}
+	}()
+
+	// Go system errors have a convention but paradoxically no
+	// interface.  All of these panic on error.
+	errV := reflect.ValueOf(ierr).Elem()
+	errV = errV.FieldByName("Err")
+	return errV.Interface().(error)
+}
+
+// RootError keeps peeling away layers or context until a primitive error is
+// revealed.
+func RootError(ierr error) (nerr error) {
+	nerr = ierr
+	for i := 0; i < 500; i++ {
+		terr := unwrapError(nerr)
+		if terr == nil {
+			return nerr
+		}
+		nerr = terr
+	}
+	return fmt.Errorf("too many iterations: %T", nerr)
+}
+
+// MatchingErrCodes keeps peeling away layers of errors to see if any of the
+// given error codes (each which should be set to true in the validCodes map)
+// are in use in any of the layers of errors... only try 40 deep for now.
+func MatchingErrCodes(err error, validCodes map[int]bool) bool {
+	errCodeFound := false
+	for i := 0; i < 500; i++ {
+		nextErr := unwrapError(err)
+		if nextErr == nil {
+			break
+		}
+		if detErr, ok := err.(DetailedError); ok {
+			currCode := detErr.GetCode()
+			if validCodes[currCode] {
+				errCodeFound = true
+				break
+			}
+		}
+		err = nextErr
+	}
+	return errCodeFound
+}
+
+// IsError performs a deep check, unwrapping errors as much as possible and
+// comparing the string version of the error (as well as having the ability
+// to check for valid/set error codes, if they are in use).  The idea is
+// that core Go libs and other pkg's often provide error constants so one can
+// detect if a given type of error is coming back from a library/pkg.  That
+// comparison only works if one has the original "core" library Go error (the
+// "root error" in the case of wrapped/nested errors).  As to error codes, with
+// a DetailedError one can use error codes... if so one can either pass in
+// a error constant or one or more error codes (or both) and any nested err
+// that uses a matching code (assuming non-0 and not set to the DefaultErrCode
+// both of which are "reserved" codes typically meaning "not set or not in use")
+// will result in True, ie: it is a matching error, being returned.
+func IsError(err, errConst error, codes ...int) bool {
+	if errConst == nil && codes == nil {
+		return false
+	}
+	if err == errConst {
+		return true
+	}
+	validCodes := make(map[int]bool)
+	if codes != nil {
+		for _, val := range codes {
+			if val != 0 && val != DefaultErrCode {
+				validCodes[val] = true
+			}
+		}
+		if MatchingErrCodes(err, validCodes) {
+			return true
+		}
+	}
+
+	if errConst == nil {
+		return false
+	}
+	// Must rely on string equivalence, otherwise a value is not equal
+	// to its pointer value.
+	rootErrStr := ""
+	rootErr := RootError(err)
+	if rootErr != nil {
+		rootErrStr = rootErr.Error()
+	}
+	errConstStr := ""
+	if errConst != nil {
+		errConstStr = errConst.Error()
+	}
+	return rootErrStr == errConstStr
 }
