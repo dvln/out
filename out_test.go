@@ -40,6 +40,17 @@ import (
 //		t.Errorf("Trace should not write '%s'.", buf.String())
 //	}
 
+func ResetOutPkg() {
+	// TESTING: this currently doesn't reset or store everything, should
+	//          likely do a deep copy of TRACE, DEBUG, etc and restore those
+	//          as well as stash all pkg globals and reset them, etc... however,
+	//          takes care of the most common ones needed for now
+	ResetNewline(true, ForBoth)
+	SetThreshold(defaultScreenThreshold, ForScreen)
+	SetThreshold(defaultLogThreshold, ForLogfile)
+	SetStackTraceConfig(StackTraceExitToLogfile)
+}
+
 func TestLevels(t *testing.T) {
 	SetThreshold(LevelIssue, ForScreen)
 	assert.Equal(t, Threshold(ForScreen), LevelIssue)
@@ -97,6 +108,9 @@ func TestOutput(t *testing.T) {
 	os.Setenv("PKG_OUT_NO_EXIT", "1")
 	Fatal("fatal error")
 	os.Setenv("PKG_OUT_STACK_TRACE_CONFIG", "")
+	// Now reset the most common things for the 'out' pkg so the next test
+	// func will operate sanely as if we're coming in fresh
+	ResetOutPkg()
 
 	assert.NotContains(t, screenBuf.String(), "trace info")
 	assert.NotContains(t, screenBuf.String(), "debugging info")
@@ -104,8 +118,7 @@ func TestOutput(t *testing.T) {
 	assert.Contains(t, screenBuf.String(), "information")
 	assert.Contains(t, screenBuf.String(), "key writer note key writer note ")
 	assert.Contains(t, screenBuf.String(), "user issue")
-	assert.Contains(t, screenBuf.String(), "critical error")
-	assert.Contains(t, screenBuf.String(), "fatal error")
+	assert.Contains(t, screenBuf.String(), "critical errorfatal error")
 
 	assert.NotContains(t, logBuf.String(), "trace info")
 	assert.NotContains(t, logBuf.String(), "debugging info")
@@ -147,6 +160,10 @@ func TestOutputln(t *testing.T) {
 	os.Setenv("PKG_OUT_NO_EXIT", "1")
 	Fatalln("fatal error")
 	os.Setenv("PKG_OUT_STACK_TRACE_CONFIG", "")
+
+	// Now reset the most common things for the 'out' pkg so the next test
+	// func will operate sanely as if we're coming in fresh
+	ResetOutPkg()
 
 	assert.NotContains(t, screenBuf.String(), "trace info\n")
 	assert.NotContains(t, screenBuf.String(), "debugging info\n")
@@ -204,6 +221,10 @@ func TestOutputf(t *testing.T) {
 	SetPrefix(LevelFatal, "Fatal: ")
 	os.Setenv("PKG_OUT_STACK_TRACE_CONFIG", "")
 
+	// Now reset the most common things for the 'out' pkg so the next test
+	// func will operate sanely as if we're coming in fresh
+	ResetOutPkg()
+
 	// debug: if you want to look at this in the test output, uncomment:
 	/*fmt.Println("Screen output:")
 	fmt.Println(screenBuf.String())
@@ -253,6 +274,10 @@ func TestDiscard(t *testing.T) {
 	Error("critical error")
 	os.Setenv("PKG_OUT_NO_EXIT", "1")
 	Fatal("fatal error")
+
+	// Now reset the most common things for the 'out' pkg so the next test
+	// func will operate sanely as if we're coming in fresh
+	ResetOutPkg()
 
 	assert.NotContains(t, screenBuf.String(), "trace info")
 	assert.NotContains(t, screenBuf.String(), "debugging info")
@@ -324,6 +349,10 @@ func TestTempFileOutput(t *testing.T) {
 		t.Errorf("Failed to remove temp file: %s (%v)", logFileName, rmerr)
 	}
 
+	// Now reset the most common things for the 'out' pkg so the next test
+	// func will operate sanely as if we're coming in fresh
+	ResetOutPkg()
+
 	assert.Contains(t, string(logFileBuf), "trace info, trace over multiple lines")
 	assert.Contains(t, string(logFileBuf), "debugging info")
 	assert.Contains(t, string(logFileBuf), "verbose info")
@@ -362,6 +391,10 @@ func TestStackTrace1(t *testing.T) {
 	// compile-time test to ensure that DetailedError conforms to error interface
 	var err error = e
 	_ = err
+
+	// Now reset the most common things for the 'out' pkg so the next test
+	// func will operate sanely as if we're coming in fresh
+	ResetOutPkg()
 }
 
 func TestStackTrace2(t *testing.T) {
@@ -374,8 +407,10 @@ func TestStackTrace2(t *testing.T) {
 	// lets dump stack traces for *any* issues, errors, fatals...
 	SetStackTraceConfig(ForScreen | StackTraceAllIssues)
 	Issue("user issue\n")
-	// kick it back into the default mode...
-	SetStackTraceConfig(ForLogfile | StackTraceExitToLogfile)
+
+	// Now reset the most common things for the 'out' pkg so the next test
+	// func will operate sanely as if we're coming in fresh
+	ResetOutPkg()
 
 	assert.Contains(t, screenBuf.String(), "Issue: user issue\n")
 	assert.Contains(t, screenBuf.String(), "Stack Trace:")
@@ -400,12 +435,26 @@ func TestDefaultErrorWithErrCode(t *testing.T) {
 	if strings.Index(errStr, "Error: Stack Trace: goroutine") == -1 {
 		t.Error("Failed to handle default error code stack trace correctly")
 	}
+
+	// Now reset the most common things for the 'out' pkg so the next test
+	// func will operate sanely as if we're coming in fresh
+	ResetOutPkg()
+}
+
+func lowLevelErr() error {
+	return fmt.Errorf("%s", "this is a low level err")
+}
+
+func trySomething() error {
+	lowErr := lowLevelErr()
+	return WrapErr(lowErr, "middle level error", 2210)
 }
 
 func TestDetailError(t *testing.T) {
 	// Lets see up a new detailed error, woohoo
+	midErr := trySomething()
 	const testMsg = "test error"
-	er := NewErr(testMsg, 293)
+	topErr := WrapErr(midErr, testMsg, 293)
 
 	// lets capture screen output while mirroring to a log file
 	screenBuf := new(bytes.Buffer)
@@ -415,7 +464,7 @@ func TestDetailError(t *testing.T) {
 	SetFlags(LevelAll, 0, ForScreen)
 	ResetNewline(true, ForBoth)
 
-	Issue(er)
+	Issue(topErr)
 
 	assert.Contains(t, screenBuf.String(), "Issue #293: test error")
 	assert.NotContains(t, screenBuf.String(), "Stack Trace:")
@@ -426,18 +475,15 @@ func TestDetailError(t *testing.T) {
 
 	ResetNewline(true, ForBoth)
 	SetStackTraceConfig(ForScreen | StackTraceAllIssues)
-	Issue(er)
-	// Reset to default stack trace config
-	SetStackTraceConfig(ForLogfile | StackTraceExitToLogfile)
+	Issue(topErr)
 
 	assert.Contains(t, screenBuf.String(), "Issue #293: test error")
 	assert.Contains(t, screenBuf.String(), "Issue #293: Stack Trace:")
-	assert.Contains(t, screenBuf.String(), "dvln/lib/out.TestDetailError")
-	// TESTING: I need a more generic ResetToDefaults() method for testing,
-	//          when done for all testing routines can get rid of the
-	//          various calls like this and the above 2nd SetStackTraceConfig()
-	//          call above that resets that to defaults for the next test
-	ResetNewline(true, ForBoth)
+	assert.Contains(t, screenBuf.String(), "Issue #293: dvln/lib/out.trySomething")
+
+	// Now reset the most common things for the 'out' pkg so the next test
+	// func will operate sanely as if we're coming in fresh
+	ResetOutPkg()
 }
 
 func TestWrappedError(t *testing.T) {
@@ -450,6 +496,10 @@ func TestWrappedError(t *testing.T) {
 	middle := WrapErr(inner, middleMsg, 400)
 	outer := WrapErr(middle, outerMsg, 200)
 	errorStr := outer.Error()
+
+	// Now reset the most common things for the 'out' pkg so the next test
+	// func will operate sanely as if we're coming in fresh
+	ResetOutPkg()
 
 	if strings.Index(errorStr, innerMsg) == -1 {
 		t.Errorf("couldn't find inner error message in:\n%s", errorStr)
@@ -498,7 +548,7 @@ type databaseError struct {
 // "constructor" for creating error (needs to store return value of
 // stackTrace() to get the stack and any context)
 func newDatabaseError(msg string, code int, extra int) databaseError {
-	stack, context := stackTrace(3)
+	stack, context := stackTrace(2)
 	return databaseError{msg, code, extra, stack, context, ERROR}
 }
 
@@ -542,22 +592,17 @@ func TestCustomError(t *testing.T) {
 	SetThreshold(LevelTrace, ForScreen)
 	SetThreshold(LevelDiscard, ForLogfile)
 	SetStackTraceConfig(ForScreen | StackTraceAllIssues)
-	ResetNewline(true, ForBoth)
 
 	// OK, redirected the 'out' package into a buffer and adjusted output
 	// thresholds for our test (to screen), turned on stack tracing (for
-	// screen), made sure newline tracing was happy (TESTING: should be
-	// removed once a ResetOutPkg() method or whatever is done), lets fire
-	// up an Error()!:
+	// screen), made sure newline tracing was happy so lets fire up an Error():
 	Error(outerError)
 	// and grab that error from the buffer and check it out
 	errorStr := screenBuf.String()
 
-	// TESTING: should be removed once ResetOutPkg() routine is written
-	// and used in the testing routines
-	SetStackTraceConfig(ForLogfile | StackTraceExitToLogfile)
-
-	// lets dump stack traces for *any* issues, errors, fatals...
+	// Now reset the most common things for the 'out' pkg so the next test
+	// func will operate sanely as if we're coming in fresh
+	ResetOutPkg()
 
 	if strings.Index(errorStr, dbMsgFinal) == -1 {
 		t.Errorf("couldn't find database error message (%s) in:\n%s", dbMsgFinal, errorStr)

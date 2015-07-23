@@ -1777,7 +1777,11 @@ func (o *LvlOutput) stringOutput(s string, dying bool, exitVal int, detErrs ...D
 		}
 	} else {
 		// but if we do get a detailed error prefer it's "earliest" stack trace
-		stacktrace = "\nStack Trace: " + detErr.GetStack()
+		var errLines []string
+		var origStack string
+		shallow := false
+		fillErrorInfo(detErr, shallow, &errLines, &origStack)
+		stacktrace = "\nStack Trace: " + origStack
 	}
 	var outputSkip int
 	if o.formatter != nil {
@@ -2165,10 +2169,12 @@ func WrapErrf(err error, code int, format string, args ...interface{}) DetailedE
 // - withStackTrace: boolean indicating if you want a stack trace w/the error,
 // note that this is the most inner stack trace (offering the most detail)
 // - shallow: boolean indicating if you want just the latest error or all errors
-// - prefix: boolean indicating if you want the standard 'out' package error
-// prefix which defaults to "Error: " if no code and "Error #<code>: " if code
-// is available in the detailed error (non 0 and non-fallback)
-func DefaultError(e DetailedError, withStackTrace, shallow, prefix bool) string {
+// - outLvlPfx: boolean indicating if you want the standard 'out' package error
+// outLvlPfx defaults to "Error: " if no code and "Error #<code>: " if code
+// is available in the detailed error (non 0 and non-fallback).  Note that if
+// you've changed your prefix to "" or something with no ':" in it then the
+// error code will not be inserted.
+func DefaultError(e DetailedError, withStackTrace, shallow, outLvlPfx bool) string {
 	var errLines []string
 	var origStack string
 
@@ -2178,8 +2184,7 @@ func DefaultError(e DetailedError, withStackTrace, shallow, prefix bool) string 
 		errLines = append(errLines, "Stack Trace: "+origStack)
 	}
 	result := strings.Join(errLines, "\n")
-	if prefix {
-		//TESTING: insure this is well covered
+	if outLvlPfx {
 		outLvl := e.GetLvlOut()
 		errCode := GetCode(e)
 		result = InsertPrefix(result, outLvl.prefix, AlwaysInsert, errCode)
