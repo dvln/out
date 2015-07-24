@@ -338,9 +338,16 @@ var (
 // - level: log level (Trace, Debug, Verbose, Info/Print, Note, Issue, Error, Fatal)
 // - code: msg or error code (if available, if not a default setting)
 // - stack: stack trace if one is available
-// - fatal: boolean True if fatal situation (only Issue/Error/Fatal levels)
-// The formatter returns a string which can be empty if nothing should printed
-// from the 'out' pkg (supresses both screen and log output if "" returned).
+// - dying: boolean True if fatal situation (only Issue/Error/Fatal levels)
+// The return data is essentially:
+// - msg (string): the update message or just the passed in msg if no updates
+// - supressOut (int): 0 if not suppressing any output otherwise, if set, one
+// - supressNativePrefixing (bool): timestamps and prefixes are still applied
+// to the result of a Formatter unless this is set to true, then not applied
+// would set it to ForScreen, ForLogfile or ForBoth if one wishes to forcibly
+// suppress the output to those targets (eg: maybe you stored the error
+// elsewhere in some JSON package and want it included in the final JSON out
+// for instance and not now).
 //
 // Example 1: you have used 'out' API's to supress all prefixes and flags
 // formatting completely for screen and log output... you want to do your own
@@ -366,7 +373,7 @@ var (
 // all off, no problem, well before getting here).
 type Formatter interface {
 	// This returns the error message without the stack trace.
-	FormatMessage(msg string, outLevel Level, code int, stack string, dying bool) (string, int)
+	FormatMessage(msg string, outLevel Level, code int, stack string, dying bool) (string, int, bool)
 }
 
 // DetailedError (interface) exposes additional information about a BaseError.
@@ -480,6 +487,20 @@ func SetShortFileNameLength(length int32) {
 	atomic.StoreInt32(&shortFileNameLength, length)
 }
 
+// LongFileNameLength returns the current "assumed" padding around long
+// file names within the "padded" flags output.  If you don't like the
+// default adjust via SetLongFileNameLength()
+func LongFileNameLength() int32 {
+	return longFileNameLength
+}
+
+// SetLongFileNameLength will set the "assumed" padding around long
+// file names within the "padded" flags output.  To get the current
+// setting see LongFileNameLength()
+func SetLongFileNameLength(length int32) {
+	atomic.StoreInt32(&longFileNameLength, length)
+}
+
 // ShortFuncNameLength returns the current "assumed" padding around short
 // func names within the "padded" flags output.  If you don't like the
 // default adjust via SetShortFuncNameLength()
@@ -568,6 +589,24 @@ func SetFormatter(level Level, formatter Formatter) {
 		defer o.mu.Unlock()
 		if level == LevelAll || o.level == level {
 			o.formatter = formatter
+			if o.level == level {
+				break
+			}
+		}
+	}
+}
+
+// ClearFormatter clears the formatters on a given level or all levels
+// if the LevelAll level is used.
+func ClearFormatter(level Level) {
+	for _, o := range outputters {
+		o.mu.Lock()
+		defer o.mu.Unlock()
+		if level == LevelAll || o.level == level {
+			o.formatter = nil
+			if o.level == level {
+				break
+			}
 		}
 	}
 }
@@ -665,7 +704,7 @@ func Discard(outputTgt int) {
 // you must give one or the other (out.ForScreen or out.ForLogfile) only.
 func Flags(level Level, outputTgt int) int {
 	level = levelCheck(level)
-	flags := 0
+	var flags int
 	for _, o := range outputters {
 		o.mu.Lock()
 		defer o.mu.Unlock()
@@ -680,7 +719,7 @@ func Flags(level Level, outputTgt int) int {
 			break
 		}
 	}
-	return (flags)
+	return flags
 }
 
 // SetFlags sets the screen and/or logfile output flags (Ldate, Ltime, .. above)
@@ -772,7 +811,7 @@ func ResetNewline(val bool, outputTgt int) {
 
 // LogFileName returns any known log file name (if none returns "")
 func LogFileName() string {
-	return (logFileName)
+	return logFileName
 }
 
 // SetLogFile uses a log file path (passed in) to result in the log file
@@ -820,7 +859,7 @@ func UseTempLogFile(prefix string) string {
 		defer o.mu.Unlock()
 		o.logfileHndl = file
 	}
-	return (logFileName)
+	return logFileName
 }
 
 // Next we head into the <Level>() class methods which don't add newlines
@@ -1176,14 +1215,26 @@ func SetStackTraceConfig(cfg int) {
 // defined routes into the 'out' pkg (ie: this will map to where 'out' was
 // called or used from basically, ignoring the various methods in this pkg
 // so as to give a stack trace relative to the users code).
-func getStackTrace(depth ...int) string {
+func getStackTrace(detErr DetailedError, depth ...int) string {
 	var myStack string
-	myDepth := int(callDepth)
-	if depth != nil {
-		myDepth = depth[0]
+	if detErr != nil {
+		// If we have a DetailedError we can get the innermost stack tarce so
+		// we have the most detail possible in our stack trace:
+		var errLines []string
+		var origStack string
+		shallow := false
+		fillErrorInfo(detErr, shallow, &errLines, &origStack)
+		myStack = "\n\nStack Trace: " + origStack
+	} else {
+		// Not a DetailedError, lets get a stack trace relative to the call
+		// to the 'out' pkg API (eg: out.Error("whatever"), where user called)
+		myDepth := int(callDepth)
+		if depth != nil {
+			myDepth = depth[0]
+		}
+		trace, _ := stackTrace(myDepth)
+		myStack = fmt.Sprintf("\n\nStack Trace: %s", trace)
 	}
-	trace, _ := stackTrace(myDepth)
-	myStack = fmt.Sprintf("\nStack Trace: %s", trace)
 	return myStack
 }
 
@@ -1403,11 +1454,11 @@ func (o *LvlOutput) stackTraceWanted(terminal bool, exitVal int, outputTgt int) 
 // see getStackTrace() for the env and package settings honored.
 func (o *LvlOutput) exit(exitVal int) {
 	// get the stacktrace if it's configured
-	stacktrace := getStackTrace()
+	stacktrace := getStackTrace(nil)
 	terminal := true
 	if stacktrace != "" && o.stackTraceWanted(terminal, exitVal, ForScreen) && o.level >= screenThreshold && o.level != LevelDiscard {
-		msg, supressOutput := o.doPrefixing("\n"+stacktrace, ForScreen, SmartInsert)
-		if !supressOutput {
+		msg, suppressOutput := o.doPrefixing(stacktrace, ForScreen, SmartInsert, nil, false)
+		if !suppressOutput {
 			_, err := o.screenHndl.Write([]byte(msg))
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%sError writing stacktrace to screen output handle:\n%+v\n", o.prefix, err)
@@ -1418,8 +1469,8 @@ func (o *LvlOutput) exit(exitVal int) {
 		}
 	}
 	if stacktrace != "" && o.stackTraceWanted(terminal, exitVal, ForLogfile) && o.level >= logThreshold && o.level != LevelDiscard {
-		msg, supressOutput := o.doPrefixing(stacktrace, ForLogfile, SmartInsert)
-		if !supressOutput {
+		msg, suppressOutput := o.doPrefixing(stacktrace, ForLogfile, SmartInsert, nil, false)
+		if !suppressOutput {
 			o.logfileHndl.Write([]byte(msg))
 		}
 	}
@@ -1591,7 +1642,7 @@ func (o *LvlOutput) insertFlagMetadata(s string, outputTgt int, ctrl int) (strin
 	var funcName string
 	var line int
 	var flags int
-	var supressOutput bool
+	var suppressOutput bool
 	var level Level
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -1613,7 +1664,7 @@ func (o *LvlOutput) insertFlagMetadata(s string, outputTgt int, ctrl int) (strin
 	} else {
 		Fatalln("Invalid target passed to insertFlagMetadata():", outputTgt)
 	}
-	supressOutput = false
+	suppressOutput = false
 	if flags&(Lshortfile|Llongfile|Lshortfunc|Llongfunc) != 0 ||
 		os.Getenv("PKG_OUT_DEBUG_SCOPE") != "" {
 		// Caller() can take a little while so unlock the mutex
@@ -1641,10 +1692,10 @@ func (o *LvlOutput) insertFlagMetadata(s string, outputTgt int, ctrl int) (strin
 		// match is done currently
 		if debugScope := os.Getenv("PKG_OUT_DEBUG_SCOPE"); funcName != "???" && debugScope != "" && (o.level == LevelDebug || o.level == LevelTrace) {
 			scopeParts := strings.Split(debugScope, ",")
-			supressOutput = true
+			suppressOutput = true
 			for _, scopePart := range scopeParts {
 				if strings.Contains(funcName, scopePart) {
-					supressOutput = false
+					suppressOutput = false
 					break
 				}
 			}
@@ -1653,13 +1704,13 @@ func (o *LvlOutput) insertFlagMetadata(s string, outputTgt int, ctrl int) (strin
 	o.buf = o.buf[:0]
 	leader := getFlagString(&o.buf, flags, level, funcName, file, line, now)
 	if leader == "" {
-		return s, supressOutput
+		return s, suppressOutput
 	}
 	// Use 0 as the error code as we don't want to try and insert any error
 	// code in standard flags prefix (that's only needed for errs/warnings),
 	// so just do a full prefixing of the flags data
 	s = InsertPrefix(s, leader, ctrl, 0)
-	return s, supressOutput
+	return s, suppressOutput
 }
 
 // doPrefixing takes the users output string and decides how to prefix
@@ -1676,6 +1727,15 @@ func (o *LvlOutput) insertFlagMetadata(s string, outputTgt int, ctrl int) (strin
 //                             // (Sceen|Log) and only prefixes the 1st line if
 //                             // it is on a fresh new line (ie: will "or" in
 //                             // SkipFirstLine to AlwaysInsert if not on fresh)
+// - detErr: a detailed error *if* one is available, else nil
+// - checkSuppressOnly: basically says skip all prefixing but still do the
+// calculation to see if we should dump this line based on trace/debug scope
+// info (which can only be calculated once we figure out what pkg/func is
+// being dumped... which, you guessed it, happens right here now).
+// Routine returns:
+// - s (string): the prefixed string (no pfx added if checkSuppressOnly is true)
+// - suppressOutput (bool): indicates if output should be suppressed due to
+//               some log level restriction, eg: see PKG_OUT_DEBUG_SCOPE
 //
 // An example of what prefixing means might be useful here, if our code has:
 //   [13:]  out.Noteln("This is a test\n", "and only a test\n")
@@ -1720,10 +1780,11 @@ func (o *LvlOutput) insertFlagMetadata(s string, outputTgt int, ctrl int) (strin
 //   <date/time> myfile.go:37: Fatal: Severe error, giving up
 //   <date/time> myfile.go:37: Fatal:
 //   <date/time> myfile.go:37: Fatal: Stack Trace: <multiline stacktrace here>
-func (o *LvlOutput) doPrefixing(s string, outputTgt int, ctrl int, detErr ...DetailedError) (string, bool) {
+func (o *LvlOutput) doPrefixing(s string, outputTgt int, ctrl int, detErr DetailedError, checkSuppressOnly bool) (string, bool) {
 	// where we check out if we previously had no newline and if so the
 	// first line (if multiline) will not have the prefix, see example
 	// in function header around username
+	origString := s
 	var onNewline bool
 	if outputTgt&ForScreen != 0 {
 		onNewline = screenNewline
@@ -1737,7 +1798,7 @@ func (o *LvlOutput) doPrefixing(s string, outputTgt int, ctrl int, detErr ...Det
 	}
 	errCode := int(defaultErrCode)
 	if detErr != nil {
-		errCode = GetCode(detErr[0])
+		errCode = GetCode(detErr)
 	}
 	s = InsertPrefix(s, o.prefix, ctrl, errCode)
 
@@ -1746,9 +1807,72 @@ func (o *LvlOutput) doPrefixing(s string, outputTgt int, ctrl int, detErr ...Det
 	}
 	// now set up metadata prefix (eg: timestamp), if any, same as above
 	// it has the brains to not add in a prefix if not needed or wanted
-	var supressOutput bool
-	s, supressOutput = o.insertFlagMetadata(s, outputTgt, ctrl)
-	return s, supressOutput
+	var suppressOutput bool
+	s, suppressOutput = o.insertFlagMetadata(s, outputTgt, ctrl)
+	if checkSuppressOnly {
+		s = origString // use non-pfx string *but* return suppressOutput result
+	}
+	return s, suppressOutput
+}
+
+// writeOutput basically sends the output to the io.Writer for the given
+// output stream.  It can add in stack traces if they have been requested
+// (ie: output level indicates Issue, Error or Fatal and set up for it).
+// This can write to screen or logfile depending upon params:
+// - s (string): the string to write
+// - outputTgt (int): either ForScreen or ForLogfile (nothing else valid)
+// - dying (bool): indicates we are about to die (can add newlines then)
+// - exitVal (int): what exit value is (only used if dying is true)
+// - stacktrace (string): if given and stack requested it will be added, note
+// that it is already pre-formatted
+// Returns:
+// - int: number of bytes written to the io.Writer associated with outputTgt
+// - error: if any unexpected write error occurred this will be a raw Go error
+func (o *LvlOutput) writeOutput(s string, outputTgt int, dying bool, exitVal int, stacktrace string) (int, error) {
+	tgtString := "logfile"
+	hndl := o.logfileHndl
+	tgtStreamNewline := &logfileNewline
+	if outputTgt&ForScreen == 1 {
+		tgtString = "screen"
+		hndl = o.screenHndl
+		tgtStreamNewline = &screenNewline
+	}
+	writeLength := 0
+	n, err := hndl.Write([]byte(s))
+	writeLength += n
+	if err != nil {
+		writeErr := fmt.Errorf("%sError writing to %s output handler:\n%+v\noutput:\n%s\n", o.prefix, tgtString, err, s)
+		return writeLength, writeErr
+	}
+	// Safely adjust these settings
+	mutex.Lock()
+	{
+		if s[len(s)-1] == 0x0A { // if last char is a newline..
+			*tgtStreamNewline = true
+		} else {
+			*tgtStreamNewline = false
+		}
+	}
+	mutex.Unlock()
+	if dying && !*tgtStreamNewline {
+		// ignore errors, just quick "prettyup" attempt:
+		n, err = hndl.Write([]byte("\n"))
+		writeLength += n
+		if err != nil {
+			writeErr := fmt.Errorf("%sError writing newline to %s output handler:\n%+v\n", o.prefix, tgtString, err)
+			return writeLength, writeErr
+		}
+	}
+	// See if stack trace is needed...
+	if o.stackTraceWanted(dying, exitVal, outputTgt) {
+		n, err = hndl.Write([]byte(stacktrace))
+		writeLength += n
+		if err != nil {
+			writeErr := fmt.Errorf("%sError writing stacktrace to %s output handle:\n%+v\n", o.prefix, tgtString, err)
+			return writeLength, writeErr
+		}
+	}
+	return writeLength, nil
 }
 
 // stringOutput uses existing screen and log levels to decide what, if
@@ -1758,6 +1882,9 @@ func (o *LvlOutput) doPrefixing(s string, outputTgt int, ctrl int, detErr ...Det
 // if it succeeds... and note that the length will include additional meta-data
 // that the user has requested be added) and an error if one occurred (only
 // one error will be considered if you pass in multiples, just the 1st).
+// WARNING: this will silently ignore multiple detailed errors if you give it
+// more than one and simply use the 1st one given (that syntax is just used
+// to make the parameter optional to the stringOutput() method)
 func (o *LvlOutput) stringOutput(s string, dying bool, exitVal int, detErrs ...DetailedError) (int, error) {
 	// print to the screen output writer first...
 	var detErr DetailedError
@@ -1765,143 +1892,57 @@ func (o *LvlOutput) stringOutput(s string, dying bool, exitVal int, detErrs ...D
 		detErr = detErrs[0]
 	}
 	var err error
-	var n int
 	var screenLength int
 	var logfileLength int
 	var stacktrace string
-	// if we're not given DetailedError(s) then lets get
-	// a stack trace here (if our level is Issue, Error or Fatal)
-	if detErr == nil {
-		if o.level >= LevelIssue {
-			stacktrace = getStackTrace()
-		}
-	} else {
-		// but if we do get a detailed error prefer it's "earliest" stack trace
-		var errLines []string
-		var origStack string
-		shallow := false
-		fillErrorInfo(detErr, shallow, &errLines, &origStack)
-		stacktrace = "\nStack Trace: " + origStack
+	// Grab the best stack trace we can find to use in case it's needed, but
+	// only for Issue, Error and Fatal levels of output (currently)... pass
+	// through any detailed error given by the user
+	if o.level >= LevelIssue {
+		stacktrace = getStackTrace(detErr)
 	}
-	var outputSkip int
+	outputSkipMask := 0
+	skipNativePfx := false
 	if o.formatter != nil {
-		s, outputSkip = o.formatter.FormatMessage(s, o.level, 100, stacktrace, dying)
-		if outputSkip&ForBoth != 0 {
-			return 0, nil // formatter says no output to do in this case
-		}
-		// TESTING: erik: need to test, with for both suppressed, for screen
-		// or for log suppressed, and need to use it to register a JSON output
-		// mechanism, sweet
+		// If the client has registered a formatting interface method then
+		// lets give it a buzz, may adjust the output or suppress it alltogether
+		// to the screen and/or logfile
+		s, outputSkipMask, skipNativePfx = o.formatter.FormatMessage(s, o.level, 100, stacktrace, dying)
 	}
-	if o.level >= screenThreshold && o.level != LevelDiscard && outputSkip&ForScreen == 0 {
-		pfxScreenStr, supressOutput := o.doPrefixing(s, ForScreen, SmartInsert, detErr)
-		if !supressOutput && s != "" {
-			//FIXME: erik: now that we have error codes (always) we need to
-			//    set up an optional formatter interface which dvln can
-			//    register... for JSON.  Should allow for non-dying and
-			//    dying formatters for both screen and logfile (dying
-			//    only applies to ISSUE w/exit, ERROR w/exit or FATAL).  Using
-			//    that the dying ones would convert the msg to a JSON error
-			//    (with msg, level and msg code), return that and it would be
-			//    dumped here.  For non-dying the formatter would do this:
-			//    a) use an 'api' pkg API to store the warning in JSON w/msg,
-			//       level, msg code (if DetailedError the msg would be
-			//       potentially multi-line, might have stacktrace as well
-			//       if that is active for msgs)
-			//    b) indicate to this method NOT to dump any output
-			//
-			//    Question: for the codes, should error and regular msg
-			//       codes come in the same context so DetailedError could
-			//       become DetailedMsg instead (and be used for errs or Msgs,
-			//       should Msgs allow "nesting" like errors with diff codes
-			//       and the same logic to use the most outer code?)
-			//
-			//     Consider: stack trace handling should be smarter if it's
-			//       a DetailedError, use the same logic used by Error() on
-			//       that type to get the "lowest" stack trace possible which
-			//       will already be in the messages (and if not available or
-			//       regular errors then we'll use existing functionality).
-			//       Also need to consider stack traces on exit, non-exit...
-			//       should we support stack traces:
-			//       - only on non-zero exit issues/errors/fatal
-			//       - on any issues/errors/fatal
-			//       - both of the above, configurable (likely), default is ???
-			//       - on message at all (probably not, too costly)
-
-			n, err = o.screenHndl.Write([]byte(pfxScreenStr))
-			screenLength += n
+	// Lets see if screen (here) or logfile (below) output is active:
+	if o.level >= screenThreshold && o.level != LevelDiscard && outputSkipMask&ForScreen == 0 {
+		// Screen output active based on output levels (and formatters, if any)
+		pfxScreenStr, suppressOutput := o.doPrefixing(s, ForScreen, SmartInsert, detErr, skipNativePfx)
+		// Note that suppressOutput is for suppressing trace/debug output so
+		// only selected/desired packages have debug output dumped (currently)
+		if !suppressOutput {
+			pfxStacktrace := ""
+			if stacktrace != "" {
+				pfxStacktrace, _ = o.doPrefixing(stacktrace, ForScreen, SmartInsert, detErr, skipNativePfx)
+			}
+			screenLength, err = o.writeOutput(pfxScreenStr, ForScreen, dying, exitVal, pfxStacktrace)
 			if err != nil {
-				myerr := fmt.Errorf("%sError writing to screen output handler:\n%+v\noutput:\n%s\n", o.prefix, err, s)
-				return screenLength, myerr
-			}
-			// Safely adjust these settings
-			mutex.Lock()
-			{
-				if s[len(s)-1] == 0x0A { // if last char is a newline..
-					screenNewline = true
-				} else {
-					screenNewline = false
-				}
-			}
-			mutex.Unlock()
-			if dying && !screenNewline {
-				// ignore errors, just quick "prettyup" attempt:
-				n, err = o.screenHndl.Write([]byte("\n"))
-				screenLength += n
-				if err != nil {
-					myerr := fmt.Errorf("%sError writing newline to screen output handler:\n%+v\n", o.prefix, err)
-					return screenLength, myerr
-				}
-			}
-		}
-		if o.stackTraceWanted(dying, exitVal, ForScreen) {
-			pfxScreenStr, _ = o.doPrefixing("\n"+stacktrace, ForScreen, SmartInsert, detErr)
-			// don't need to check supressOutput, possible for debug/trace only
-			n, err = o.screenHndl.Write([]byte(pfxScreenStr))
-			screenLength += n
-			if err != nil {
-				myerr := fmt.Errorf("%sError writing stacktrace to screen output handle:\n%+v\n", o.prefix, err)
-				return screenLength, myerr
+				return screenLength, err
 			}
 		}
 	}
 
-	// print to the log file writer next
-	if o.level >= logThreshold && o.level != LevelDiscard && outputSkip&ForLogfile == 0 {
-		pfxLogfileStr, supressOutput := o.doPrefixing(s, ForLogfile, SmartInsert, detErr)
-		if !supressOutput && s != "" {
-			n, err = o.logfileHndl.Write([]byte(pfxLogfileStr))
-			logfileLength += n
-			if err != nil {
-				myerr := fmt.Errorf("%sError writing to logfile output handler:\n%+v\noutput:\n%s\n", o.prefix, err, s)
-				return logfileLength, myerr
-			}
-			// Safely adjust these settings
-			mutex.Lock()
-			{
-				if s[len(s)-1] == 0x0A {
-					logfileNewline = true
-				} else {
-					logfileNewline = false
-				}
-			}
-			mutex.Unlock()
-			if dying && !logfileNewline {
-				o.logfileHndl.Write([]byte("\n"))
-				logfileLength += n
-				if err != nil {
-					myerr := fmt.Errorf("%sError writing newline to screen output handler:\n%+v\n", o.prefix, err)
-					return logfileLength, myerr
-				}
-			}
+	// Print to the log file writer next (if needed):
+	if o.level >= logThreshold && o.level != LevelDiscard && outputSkipMask&ForLogfile == 0 {
+		pfxLogfileStr, suppressOutput := o.doPrefixing(s, ForLogfile, SmartInsert, detErr, skipNativePfx)
+		if skipNativePfx {
+			pfxLogfileStr = s
 		}
-		if o.stackTraceWanted(dying, exitVal, ForLogfile) {
-			pfxLogfileStr, _ = o.doPrefixing("\n"+stacktrace, ForLogfile, SmartInsert, detErr)
-			n, err = o.logfileHndl.Write([]byte(pfxLogfileStr))
-			logfileLength += n
+		// Note that suppressOutput is for suppressing trace/debug output so
+		// only selected/desired packages have debug output dumped (currently)
+		if !suppressOutput {
+			pfxStacktrace := ""
+			if stacktrace != "" {
+				pfxStacktrace, _ = o.doPrefixing(stacktrace, ForLogfile, SmartInsert, detErr, skipNativePfx)
+			}
+			logfileLength, err = o.writeOutput(pfxLogfileStr, ForLogfile, dying, exitVal, pfxStacktrace)
 			if err != nil {
-				myerr := fmt.Errorf("%sError writing stacktrace to logfile output handle:\n%+v\n", o.prefix, err)
-				return logfileLength, myerr
+				return logfileLength + screenLength, err
 			}
 		}
 	}

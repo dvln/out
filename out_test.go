@@ -49,6 +49,7 @@ func ResetOutPkg() {
 	SetThreshold(defaultScreenThreshold, ForScreen)
 	SetThreshold(defaultLogThreshold, ForLogfile)
 	SetStackTraceConfig(StackTraceExitToLogfile)
+	ClearFormatter(LevelAll)
 }
 
 func TestLevels(t *testing.T) {
@@ -66,6 +67,10 @@ func TestOutput(t *testing.T) {
 	screenBuf := new(bytes.Buffer)
 	logBuf := new(bytes.Buffer)
 
+	currWriter := Writer(LevelFatal, ForScreen)
+	if currWriter != os.Stderr {
+		t.Error("Current screen writer for fatal error should be os.Stderr, it was not though")
+	}
 	SetWriter(LevelAll, screenBuf, ForScreen)
 	SetWriter(LevelAll, logBuf, ForLogfile)
 
@@ -148,6 +153,11 @@ func TestOutputln(t *testing.T) {
 	SetThreshold(LevelNote, ForLogfile)
 
 	SetFlags(LevelAll, LstdFlags|Lmicroseconds|Lshortfile|Lshortfunc, ForLogfile)
+	newFlags := Flags(LevelInfo, ForLogfile)
+	if newFlags&Lmicroseconds == 0 || newFlags&LstdFlags == 0 ||
+		newFlags&Lshortfile == 0 || newFlags&Lshortfunc == 0 {
+		t.Error("Package out flags apparently did not get set as expected")
+	}
 
 	Traceln("trace info")
 	Debugln("debugging info")
@@ -194,9 +204,7 @@ func TestOutputf(t *testing.T) {
 
 	SetWriter(LevelAll, screenBuf, ForScreen)
 	SetWriter(LevelAll, logBuf, ForLogfile)
-
-	SetThreshold(LevelTrace, ForScreen|ForLogfile)
-
+	SetThreshold(LevelTrace, ForBoth)
 	SetFlags(LevelAll, LstdFlags|Lmicroseconds|Lshortfile|Llongfunc, ForBoth)
 
 	os.Setenv("PKG_OUT_DEBUG_SCOPE", "boguspkg.")
@@ -216,6 +224,10 @@ func TestOutputf(t *testing.T) {
 	Errorf("%s\n", "critical error")
 	os.Setenv("PKG_OUT_NO_EXIT", "1")
 	os.Setenv("PKG_OUT_STACK_TRACE_CONFIG", "both,nonzeroerrorexit")
+	fatalPfx := Prefix(LevelFatal)
+	if fatalPfx != "Fatal: " {
+		t.Errorf("The fatal prefix appears to be set incorrectly, currently: \"%s\", expected: \"Fatal: \"", fatalPfx)
+	}
 	SetPrefix(LevelFatal, "FREAKOUT: ")
 	Fatalf("%s\n", "fatal error")
 	SetPrefix(LevelFatal, "Fatal: ")
@@ -460,7 +472,7 @@ func TestDetailError(t *testing.T) {
 	screenBuf := new(bytes.Buffer)
 	SetWriter(LevelAll, screenBuf, ForScreen)
 	SetThreshold(LevelTrace, ForScreen)
-	SetThreshold(LevelDiscard, ForLogfile)
+	Discard(ForLogfile)
 	SetFlags(LevelAll, 0, ForScreen)
 	ResetNewline(true, ForBoth)
 
@@ -625,6 +637,227 @@ func TestCustomError(t *testing.T) {
 	}
 }
 
+type killScreenOut struct{}
+type replaceMsg struct{}
+type detectDying struct{}
+
+// FormatMessage in this context is to test the formatting "feature" of
+// the 'out' package.
+func (f killScreenOut) FormatMessage(msg string, outLevel Level, code int, stack string, dying bool) (string, int, bool) {
+	suppressOutputMask := ForScreen
+	suppressNativePrefixing := false
+	return msg, suppressOutputMask, suppressNativePrefixing
+}
+
+// FormatMessage in this context is to test the formatting "feature" of
+// the 'out' package to see if it will suppress the
+func (f replaceMsg) FormatMessage(msg string, outLevel Level, code int, stack string, dying bool) (string, int, bool) {
+	msg = "Replacement message, joy joy joy"
+	suppressOutputMask := ForLogfile
+	suppressNativePrefixing := true
+	return msg, suppressOutputMask, suppressNativePrefixing
+}
+
+// FormatMessage in this context is to test the formatting "feature" of
+// the 'out' package.
+func (f detectDying) FormatMessage(msg string, outLevel Level, code int, stack string, dying bool) (string, int, bool) {
+	if dying {
+		msg = "Looks like we are dying [DYING]"
+	}
+	suppressOutputMask := 0
+	suppressNativePrefixing := false
+	return msg, suppressOutputMask, suppressNativePrefixing
+}
+
+func TestFormatter(t *testing.T) {
+	// Aside: if you want to see nested error messages one could create errors
+	// something like this for each level (ie: extend DetailedError with your
+	// own error so all detailed errors append " [#<errcode>]" for example to
+	// error lines... here we'll just shove more data into the db message
+	dbMsg := "database error %d [%d] (lock wait time exceeded)"
+	outerMsg := "outer msg"
+
+	dbError := newDatabaseError(dbMsg, 1205, -1)
+	outerError := WrapErr(dbError, outerMsg)
+
+	screenBuf := new(bytes.Buffer)
+	logfileBuf := new(bytes.Buffer)
+	SetWriter(LevelAll, screenBuf, ForScreen)
+	SetWriter(LevelAll, logfileBuf, ForLogfile)
+	SetThreshold(LevelTrace, ForScreen)
+	SetThreshold(LevelTrace, ForLogfile)
+	SetStackTraceConfig(ForBoth | StackTraceAllIssues)
+	var screenOutOff killScreenOut
+	SetFormatter(LevelAll, screenOutOff)
+
+	// OK, redirected the 'out' package into a buffer and adjusted output
+	// thresholds for our test (to screen), turned on stack tracing (for
+	// screen)
+	Error(outerError)
+	// Now grab that error from the buffer and check it out
+	screenErrStr := screenBuf.String()
+	logfileErrStr := logfileBuf.String()
+
+	// At this point we have set a formatter that should prevent any screen
+	// buffer output (see SetFormatter() call above), lets make sure we don't
+	// see the error or a stack trace in the screen output
+	assert.NotContains(t, screenErrStr, "Error #1205:")
+	assert.NotContains(t, screenErrStr, "Stack Trace:")
+
+	// But we have enabled logfile writer (buffer) output with stack
+	// tracing on so we should see the log file output of that data:
+	assert.Contains(t, logfileErrStr, "Error #1205:")
+	assert.Contains(t, logfileErrStr, "Stack Trace:")
+
+	// Now reset the most common things for the 'out' pkg so the next test
+	// func will operate sanely as if we're coming in fresh
+	ResetOutPkg()
+
+	screenBuf = new(bytes.Buffer)
+	SetWriter(LevelAll, screenBuf, ForScreen)
+	SetThreshold(LevelTrace, ForScreen)
+	SetThreshold(LevelDiscard, ForLogfile)
+	var screenReplaceMsg replaceMsg
+	SetFormatter(LevelAll, screenReplaceMsg)
+
+	// OK, redirected the 'out' package into a buffer and adjusted output
+	// thresholds for our test (to screen)
+	Error(outerError)
+
+	// Grab that error from the buffer and check it out
+	screenErrStr = screenBuf.String()
+	assert.NotContains(t, screenErrStr, "Stack Trace:")
+	assert.NotContains(t, screenErrStr, "Error #1205:")
+	assert.Contains(t, screenErrStr, "Replacement message, joy joy joy")
+
+	// Now reset the most common things for the 'out' pkg so the next test
+	// func will operate sanely as if we're coming in fresh
+	ResetOutPkg()
+
+	screenBuf = new(bytes.Buffer)
+	SetWriter(LevelAll, screenBuf, ForScreen)
+	SetThreshold(LevelTrace, ForScreen)
+	Discard(ForLogfile)
+	var screenDetectDying detectDying
+	SetFormatter(LevelAll, screenDetectDying)
+
+	// OK, redirected the 'out' package into a buffer and adjusted output
+	// thresholds for our test (to screen)
+	os.Setenv("PKG_OUT_NO_EXIT", "1")
+	ErrorExit(-1, outerError)
+	os.Setenv("PKG_OUT_NO_EXIT", "0")
+
+	// Grab that error from the buffer and check it out
+	screenErrStr = screenBuf.String()
+	assert.NotContains(t, screenErrStr, "Stack Trace:")
+	assert.Contains(t, screenErrStr, "Looks like we are dying [DYING]")
+
+	// Reset the most common things for the 'out' pkg so the next test
+	// func will operate sanely as if we're coming in fresh
+	ResetOutPkg()
+}
+
+func TestSettingVals(t *testing.T) {
+	origVal := ErrorExitVal()
+	if origVal != errorExitVal {
+		t.Errorf("Default error exit value is not %d but should be", errorExitVal)
+	}
+	var newVal int32
+	newVal = 1
+	SetErrorExitVal(newVal)
+	newVal = ErrorExitVal()
+	if newVal != 1 {
+		t.Errorf("Setting new error exit val to 1 appears to have failed, found: %d", newVal)
+	}
+	SetErrorExitVal(errorExitVal)
+
+	origVal = DefaultErrCode()
+	if origVal != defaultErrCode {
+		t.Errorf("Default error code is not %d as expected", defaultErrCode)
+	}
+	newVal = 1000
+	SetDefaultErrCode(newVal)
+	newVal = DefaultErrCode()
+	if newVal != 1000 {
+		t.Errorf("Setting new default error code to 1000 appears to have failed, found: %d", newVal)
+	}
+	SetDefaultErrCode(defaultErrCode)
+
+	origVal = CallDepth()
+	if origVal != callDepth {
+		t.Errorf("Default call depth is not %d as expected", callDepth)
+	}
+	newVal = 6
+	SetCallDepth(newVal)
+	newVal = CallDepth()
+	if newVal != 6 {
+		t.Errorf("Setting new call depth to 6 appears to have failed, found: %d", newVal)
+	}
+	SetCallDepth(callDepth)
+
+	origVal = ShortFileNameLength()
+	if origVal != shortFileNameLength {
+		t.Errorf("Default short file name length is not %d as expected, found: %d", shortFileNameLength, origVal)
+	}
+	newVal = 30
+	SetShortFileNameLength(newVal)
+	newVal = ShortFileNameLength()
+	if newVal != 30 {
+		t.Errorf("Setting short file name length to 30 appears to have failed, found: %d", newVal)
+	}
+	SetShortFileNameLength(shortFileNameLength)
+
+	origVal = LongFileNameLength()
+	if origVal != longFileNameLength {
+		t.Errorf("Default long file name length is not %d as expected, found: %d", longFileNameLength, origVal)
+	}
+	newVal = 69
+	SetLongFileNameLength(newVal)
+	newVal = LongFileNameLength()
+	if newVal != 69 {
+		t.Errorf("Setting long file name length to 69 appears to have failed, found: %d", newVal)
+	}
+	SetLongFileNameLength(longFileNameLength)
+
+	origVal = ShortFuncNameLength()
+	if origVal != shortFuncNameLength {
+		t.Errorf("Default short Func name length is not %d as expected, found: %d", shortFuncNameLength, origVal)
+	}
+	newVal = 30
+	SetShortFuncNameLength(newVal)
+	newVal = ShortFuncNameLength()
+	if newVal != 30 {
+		t.Errorf("Setting short Func name length to 30 appears to have failed, found: %d", newVal)
+	}
+	SetShortFuncNameLength(shortFuncNameLength)
+
+	origVal = LongFuncNameLength()
+	if origVal != longFuncNameLength {
+		t.Errorf("Default long Func name length is not %d as expected, found: %d", longFuncNameLength, origVal)
+	}
+	newVal = 69
+	SetLongFuncNameLength(newVal)
+	newVal = LongFuncNameLength()
+	if newVal != 69 {
+		t.Errorf("Setting long Func name length to 69 appears to have failed, found: %d", newVal)
+	}
+	SetLongFuncNameLength(longFuncNameLength)
+}
+
+func TestLevelConversion(t *testing.T) {
+	traceStr := fmt.Sprintf("%s", LevelTrace)
+	traceLvl := LevelString2Level(traceStr)
+	if traceLvl != LevelTrace {
+		t.Errorf("Failed to map trace level to string and back")
+	}
+
+	errorStr := fmt.Sprintf("%s", LevelError)
+	errorLvl := LevelString2Level(errorStr)
+	if errorLvl != LevelError {
+		t.Errorf("Failed to map error level to string and back")
+	}
+}
+
 type customErr struct {
 }
 
@@ -675,4 +908,14 @@ func TestRootError(t *testing.T) {
 	if err != syscall.ECONNREFUSED {
 		t.Fatalf("expected ECONNREFUSED on valid nested error: %T %v", err, err)
 	}
+}
+
+func TestLogfileNameSet(t *testing.T) {
+	currFileName := LogFileName()
+	tmpFileName := UseTempLogFile("dvln")
+	newFileName := LogFileName()
+	if newFileName != tmpFileName {
+		t.Errorf("Temp log file name setting or retrieving broken, found: \"%s\", but expected: \"%s\"", newFileName, tmpFileName)
+	}
+	logFileName = currFileName
 }
