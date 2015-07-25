@@ -142,6 +142,13 @@ const (
 	LlogfileFlags = Lpid | Llevel | Ldate | Ltime | Lmicroseconds | Lshortfile | Lshortfunc
 )
 
+// FEATURE: add in userid to the list of goodies, turn on by default for logfile
+// so it looks like this:
+// [616]   brady INFO    2015/07/25 01:05:01.886736 get.go:75:get                 : Look up codebase
+// FEATURE: clean up the out.go file a bit:
+// - migrate detailed error stuff "mostly" into deterr.go module in this dir
+// - migrate formatter stuff "mostly" into fmt.go module in this dir
+
 // Available output and logging levels to this package, by
 // default "normal" info output and any notes/issues/errs/fatal/etc
 // will be dumped to stdout and, by default, file logging for that output
