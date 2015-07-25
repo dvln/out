@@ -13,6 +13,36 @@ level output one can also control which package(s) or function(s) have their deb
 info dumped (by default all debug data is dumped).  This can reduce debug output to
 only those areas of code one wishes to focus on.
 
+Here's an example of a fake CLI tool that has a JSON config file indicating to mirror
+(record) screen output to a logfile in the given location (calls a couple of API's
+to enable that, see below).  Note that the default log file settings result in this
+mirrored/augmented output:
+
+```text
+% cat ~/.mytool/cfg.json 
+{ "record" : "~/work/mytool/src/mytool/logfile.txt"
+}
+% mytool get --codebase=test --devline=julius
+Look up codebase
+Look up devline
+Getting packages from codebase test, devline julius
+% cat ~/work/mytool/src/mytool/logfile.txt 
+[616] INFO    2015/07/25 01:05:01.886736 get.go:75:get                 : Look up codebase
+[616] INFO    2015/07/25 01:05:01.886882 get.go:78:get                 : Look up devline
+[616] INFO    2015/07/25 01:05:01.886913 get.go:81:get                 : Getting packages from codebase test, devline julius
+% 
+
+```
+
+So we see the pid, the general output level (print/info are the same), the
+date/time, the go file and line # for each output call as well as the function
+name... along with the output formatted to align so if longer func names mixed
+in it would still look good and be comparable to the screen output easily.
+One can augment the data, add in stack tracing for error class output, etc.
+I could easily filter logfile output to only issues, errors or fatal messages
+or to include trace or regular debug level messages as well while the screen
+would be unchanged (or I can adjust the screen output stream if desired).
+
 I've written CLI tools in the past where I wanted greater control of where I
 send my output stream and how that stream might be dynamically "marked up",
 split/mirrored/redirected and/or filtered via leveling.  To be able to easily
