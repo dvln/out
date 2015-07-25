@@ -2190,7 +2190,7 @@ func NewErr(msg string, code ...int) DetailedError {
 
 // NewErrf is the same as Err, but with fmt.Printf-style params and error
 // code # required
-func NewErrf(format string, code int, args ...interface{}) DetailedError {
+func NewErrf(code int, format string, args ...interface{}) DetailedError {
 	stack, context := stackTrace(2)
 	return &BaseError{
 		Msg:     fmt.Sprintf(format, args...),

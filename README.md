@@ -150,54 +150,83 @@ An example of standard usage:
         "github.com/dvln/out"
     )
 
+    // Lets set up a tmp logfile first
+    logFileName := out.UseTempLogFile("mytool.")
+    // Print that to the screen as logfile currently discarding output
+    out.Println("Temp log file:", logFileName)
+
+    // Set logfile output threshold: verbose, info/print, note, issue, err, fatal:
+    out.SetThreshold(out.LevelVerbose, out.ForLogfile)
+    // Note that stack traces for non-zero exit (IssueExit/ErrorExit/Fatal)
+    // are set up,by default, to go to the logfile (which we just config'd)
+
     ...
     // Day to day normal output
     out.Printf("some info: %s\n", infostr)
 
-    // Less important output not shown unless in verbose mode
+    // Less important output not shown to screen (LevelInfo default) but it
+    // will go into the logfile (LevelVerbose as above)
     out.Verbosef("data was pulled from src: %s\n", source)
 
     ...
+    // Will be dumped as 'Note: Keep in mind ...', coming one output
+    // level above the Print/Info routines (LevelInfo) as LevelNote:
+    out.Noteln("Keep in mind that when this is done you need to do z")
+
+    ...
     if err != nil {
-        // Something like an issue to take note of but recoverable,
-        // here output is:
-        //   Issue: <error>
-        //   Issue: Recovering and continuing with the process ..
-        out.Issue(err, "\nRecovering and continuing ")
-        out.Issueln("with the process ..")
+        // Something like an issue that, if it sticks around, one might want
+        // to contact the infra team to fix before it keeps is from working:
+        //   Issue: Some expected compute resources offline due to unexpected issue:
+        //   Issue:   <somerr>
+        //   Issue: If this continues for a while let IT know, continuing...
+        // If we wanted a stack trace for all issues to the logfile we
+        // could have set this here or above and we would get a stack
+        // in the log file and the tool would keep running:
+        //   out.SetStackTraceConfig(out.ForLogfile|out.StackTraceAllIssues)
+        // If you want it on the screen also use out.ForBoth instead.
+        out.Issuef("Some expected compute resources offline due to unexpected issue:\n  %s\n", err)
+        out.Issueln("If this continues for a while let IT know, continuing...")
     }
     ...
     if err != nil {
         // Maybe this is a more severe unexpected error, but recoverable
-        out.Errorf("File read failure (file: %s), ignoring: %s\n", file, err)
+        out.Errorf("Unexpected File read failure (file: %s), WTF, bypassing.\n  Error: %s\n", file, err)
     }
     ...
     if err != nil {
-        // This is a fatal error that we want a stack trace for our screen
-        // output for (could use ForLogfile or ForBoth as well)... and one
-        // can indicate non-zero exits (as below), any error exit via the
-        // "StackTraceErrorExit" setting or via StackTraceAllIssues one can
-        // cause a trace for any type of warning/error (Issue/Error/Fatal):
-        // Note: the env PKG_OUT_STACK_TRACE_CONFIG can be used as alternative
-        //       dynamic way to kick on stack traces without using the API
-        //       call below for SetStackTraceConfig().. eg:  set the env
-        //       var to "screen,allissues" or "both,nonzeroerrorexit" or
-        //       perhaps "logfile,allissues" to kick it on).  For the API:
-		out.SetStackTraceConfig(out.ForScreen|out.StackTraceNonZeroErrorExit)
+        // With above settings a stack trace will go to the log file along
+        // with this error message above it.  Note that one can dynamically
+        // add/rm stack traces at runtime as well via PKG_OUT_STACK_TRACE_CONFIG
         out.Fatalln(err)
+
+        // Aside: maybe you don't like the 'Fatal: <msg>' prefix that will add,
+        // you can remove that via SetPrefix() or you can exit out of an Issue
+        // or error level message if you prefer those prefixes (but it will be
+        // at a less severe level), see IssueExit[f|ln]() and ErrorExit[f|ln]()
     }
 
 ```
+
+Pretty straightforward.  Your code can get/set output thresholds (which levels
+are printed to the screen or to a log file, independently), config stack traces
+and when to see them, remove/add/change message prefixes, set flags to mark up
+screen or log file output with timestamps/filename/line#'sa, re-route where
+data is written to (via io.Writer's), plug in your own formatter if you don't
+like these built-in options (which can reformat, suppress/re-route output, etc)
+and even use built-in "detailed" errors if preferred (more below).  Note also
+that one can easily hook up CLI options like a debug or verbose option into
+API's to set output thresholds and turn on get logfile names and such.
 
 There are 8 output levels (perhaps too many for most folks) but one can, of
 course, just use those that a given product needs.  There is no need to use
 levels you do not want.
 
 Quick note: some packages like spf13's 'viper' have been ported to 'out' in
-my fork of these packages, see:"github.com/dvln/viper" for example.
+the 'dvln' organization, see 'http://github.com/dvln' for those.
 
-The default settings add default "prefixes" on some of the messages, the
-defaults for "screen" output are:
+The default configuration of 'out' sets up default "prefixes" on some of
+the output levels.  The defaults for "screen" output out of the box are:
 
 ```text
   Trace level (stdout):           "<date/time> Trace: <msg>"
@@ -211,15 +240,18 @@ defaults for "screen" output are:
 
 ```
 
-You can change anything about the default output values, prefixes, flags, etc and
-even adjust where the output is sent.  You cannot adjust the hidden built-in
-variable names used by API's and such (eg: LevelIssue), but all visible/output
-can be adjusted.
+You can change anything about the default output values, prefixes, flags, etc
+and adjust where the output is sent.  You cannot adjust the hidden built-in
+level names used by API's (unless you tweak the code, eg: LevelIssue), but
+all client visible output can be adjusted (so if you prefer "Warning: " as
+a prefix for the Issue level that is easy to tweak.
 
-For the default log file output we start with an ioutil.Discard for the
-io.Writer which effectively means /dev/null to begin with.  However, if you
-set a log file up using provided API's (as below) then the default log file
-output will kick on and behave as follows:
+For the default log file output io.Writer this starts with an ioutil.Discard
+which effectively means send output to /dev/null even if the logging threshold
+says to log.  The default logging threshold is also set to discard data send to
+the logfile output stream.  However, once these two items are set up (as in
+examples above and below) then this is the default config for the various
+levels for a logfile:
 
 ```text
    Trace level:         "[<pid>] TRACE   <date/time> <shortfile:line#:shortfunc> Trace: <msg>"
@@ -239,7 +271,8 @@ a log file, as you'll see below, these are the two things to do:
 1. Use an API call to prepare a temp or named file (will set up an io.Writer)
 2. Use an API call to set the log level (so something is logged to your file)
 
-Details below.
+Once that is done use an API to set the desired output level for the log file
+and you are set.  More details below.
 
 ## Details on (optionally) configuring the 'out' package
 
@@ -511,6 +544,222 @@ give it an io.Writer for any output so use of these 'out' package writers
 can come in handy for this or the many other packages that take an io.Writer
 (or one could write to a buffer io.Writer as shown above).
 
+### Set up a Formatter and adjust or redirect the info to be dumped
+
+Formatters can be attached at any output level (or to all output levels).
+They are currently independent of output target meaning they get the raw
+message that is being given (to screen or out), even before it's determined
+if screen or log file output is active (based on thresholds and such) and
+before the message has been prefixed or augented with flag metadata.  The
+formater can change the message, augment it, make it empty and can also
+tell the 'out' package to skip prefixes and flags based meta-data additions
+if desired... and can even tell the 'out' package NOT to dump the message
+to either screen or log file or both if desired.  A formatter is a Go
+interface so if you implement the interface with an empty struct for
+example then one can instantiate that and use SetFormatter() to attach
+it to any of the log levels (or all of them).  Note that the formatter
+will be told if this is a terminal type issue (IssueExit(), ErrorExit()
+or Fatal()) so you can behave correctly if dying or not.
+
+One would use a custom formatter if one wished to do something like:
+1. Skip all output prefixing and meta-data markup and use my own custom setup
+2. Dynamically morph a message (eg: add error code to msg, morph it to JSON)
+3. Take the message and NOT dump it to screen and/or log, redirect it elsewhere
+4. Whatever else you can think of 
+
+I created this because my CLI has text and JSON output modes and I wanted
+my Issue/Error/Fatal calls to be dumped in a JSON compatible way (so my errors,
+no matter where they are done, end up coming out as JSON when I'm in that
+mode).  To do this I attached a formatter to the Issue/Error/Fatal level
+and I handle dying issues/errors/fatals in that formatter differently than
+non-terminal issues/errors.  Dying errors form up a small/tight JSON output
+that includes the 'error', and the msg, error level (ISSUE/ERROR/FATAL) 
+and error code (if one is available, defaults to 100, see next section
+on detailed errors and their optional use with this package).  Any non
+fatal type of Issue or Error gets stored as a 'warning' in my final JSON
+structure and is not printed at all at this time to the screen or log file
+as the "final" JSON will be dumped at the end with the 'warning' field in
+it (filled in with the msg, level and code if one is available).
+
+Anyhow, I tried to make it generic so you can just reformat messages or
+override build-in formatting when desired... probably the more common use
+case.  Here's how one might add this in:
+
+```go
+    import (
+        "github.com/dvln/out"
+    )
+    ...
+    type mungeOutput struct{}
+
+    // FormatMessage takes the following params:
+    // - msg (string): The raw message coming from the clients call (eg: "out.Println(msg)")
+    // - outLevel (Level): This is the output level (out.LevelTrace, out.LevelDebug, etc), one
+    //   can get a text representation via 'fmt.Sprintf("%s", outLevel)' if needed (eg: "TRACE")
+    // - code (int): An error code, defaults to the 'out' pkg default if err codes not in use (100)
+    // - stack (string): If the Issue/Error/Fatal level then the "best" stack trace available is
+    //     passed in (prefixed with "\nStack Trace: <stack>").  Normally don't use this since the
+    //     built-in stuff will "smart" add it based on if stack traces are active or not to the
+    //     given output target.  However, here it is if you need it.
+    // - dying (bool): Will be true if this is a terminal situation, IssueExit(), ErrorExit() or
+    //     Fatal() has been called... as this may effect what you do or return (see example above)
+    func (f mungeOutput) FormatMessage(msg string, outLevel Level, code int, stack string, dying bool) (string, int, bool) {
+        // Lets add "[fun fun fun]" to the end of all our messages:
+        msg = fmt.Sprintf("%s [fun fun fun]", msg)
+
+        // One can suppress out.ForBoth, out.ForLogfile, out.ForScreen but I
+        // won't suppress any output, I'm just munging the message a little:
+        suppressOutputMask := 0
+
+        // I will not suppress any native 'out' pkg formatting so I'll still
+        // get my 'Error: ' prefix (if this was an error) and I'll still get
+        // any flags meta-data added to my msg, same as would have happened
+        // if a formatter wasn't used and a msg came through
+        suppressNativePrefixing := false
+
+        // That's it... return the msg to use and if anything should be suppressed
+        return msg, suppressOutputMask, suppressNativePrefixing
+    }
+
+    func main () {
+        ...
+        var myOutputTweaker mungeOutput
+        out.SetFormatter(out.LevelAll, myOutputTweaker)
+
+        ...
+        out.Print("This is fun")
+        out.Error("Something went wrong!")
+        out.Exit(0)
+    }
+```
+
+That would implement the Formatter interface and all your output calls
+would get routed through your formatter, adjusting them as desired (and
+possibly suppressing built-in formatting and prefixing and such or even
+preventing output if desired from the 'out' package).
+
+### Using detailed errors for your erroring (optional, not required!!!)
+
+To create a new detailed error one would use one of the following:
+
+```text
+  Without using error codes:              With using error codes:
+  ------------------------------------_   ----------------------------------------
+  out.NewErr("Some error message")        out.NewErr("Some error message", code)
+  out.NewErrf(0, "Some error: %s", msg)   out.NewErrf(code, "Some error: %s", msg)
+```
+
+Yeah, not great for NewErrf, but you get the idea... variadic args and all.
+Anyhow, these will store the error message, the error code and a stack trace
+from where this was called directly in the detailed error.
+
+Another way to create a detailed error is to wrap a regular Go error with
+a detailed error... one can also wrap another detailed error as an error
+is passed back through routines.  Usage for wrapping:
+
+```text
+  Without using error codes:                   With using error codes:
+  -------------------------------------------  ----------------------------------------------
+  out.WrapErr(err, "Some error message")       out.WrapErr(err, "Some error message", code)
+  out.WrapErrf(err, 0, "Some error: %s", msg)  out.WrapErrf(err, code, "Some error: %s", msg)
+```
+
+Like a new error a wrapped error stores the original error as
+the "inner" error, stores the new detailed error msg, error code
+and a stack trace from where this was called.  You can continue
+to wrap errors again and again if it's helpful for your needs.
+When you dump an error it will traverse all wrapped errors down
+to the initial or root error and show the newest to the oldest
+errors (unless you ask for a "shallow" message then only the
+most recent message will be shown).  As for stack traces it
+will use the oldest error that has a stack trace included as
+that will be closest to when the problem first occurred and give
+you the easiest troubleshooting.
+
+If you want to see if a detailed error "contains" an error that is
+set up in the standard library (for example) you can use this:
+```go
+    if IsError(myErr, ErrConstName) {
+        // if the detailed errors "root" error matches ErrConstName IsError()
+        // will be true and you'll match
+    }
+
+    // If you are using error codes you can also match on error codes:
+    if IsError(myErr, nil, 500) {
+        // if error code 500 it used in *any* of the nested errors
+        // in my detailed error then IsError() will return true
+    }
+```
+
+For my tools I plan on using detailed errors for all my errors and I
+will wrap "core" stdlib class errors as quickly as possible within the
+routine that experienced them before passing them back so I have a stack
+trace that points directly to where the issue started from (even if it 
+was passed down/back through 3 or 4 routines before being printed the stack
+will still be clear as to the original location of the issue).
+
+Here is a fuller example of what will happen if you use the detailed error
+feature and you pass those errors into Issue, Error or Fatal related routines
+in the 'out' package:
+
+```go
+    ...
+    func tryInnerFunc() error {
+        ...
+        if err := someStdlibFileOpenCall(...); err != nil {
+            return out.WrapErr(err, "Problem: related to opening mytool config file:", 2040)
+        }
+    }
+
+    func tryMiddleFunc() error {
+        ...
+        if err := tryInnerFunc(); err != nil {
+            return out.WrapErr(err, "Failure occurred during \"middle functionality\".", 3010)
+        }
+    }
+
+    func main() {
+        ...
+        // Maybe we think this is too generic and so we won't give it an error number
+        // but we'll still drop in an overall top level class message
+        out.SetStackTraceConfig(out.ForBoth|out.StackTraceNonZeroErrorExit)
+        if err := tryMiddleFunc(); err != nil {
+            out.Fatal(out.WrapErr(err, "Tool unable to complete requested task.")
+
+            // The above could just as easily have been 'out.Fatal(err)' if one
+            // did not want that high level message at all.
+        }
+    }
+```
+
+It would use the "highest" error code (3010) for the message although IsError()
+would match on 2040 and 3010 both as well as the original system error.  The
+output of the Fatal call would be something like:
+
+```go
+Fatal #3010: Tool unable to complete requested task.
+Fatal #3010: Failure occurred during "middle functionality".
+Fatal #3010: Problem: related to opening mytool config file:
+Fatal #3010: <system error returned from file open call>
+Fatal #3010: 
+Fatal #3010: Stack Trace: go routing 1 [running]:
+Fatal #3010: ...[stack trace pointing at tryInnerFunc() WrapErr call location]...
+```
+
+With that our stack trace points to where the problem really occurred and
+the rest of our output gives a clean indication of what happened all the
+way down to the actual stdlib error that occurred and couches that within
+other error wraps (optional of course except for that WrapErr() right
+where the original error occurred, that's where that really needs to be).
+
+Note: if you change the prefix via SetPrefix() so "Issue: ", "Error: "
+or "Fatal: " drops the : or has more than one : then the error code
+auto-insertion will not happen.  Also note that the default error code
+which starts out as 100 but you can change that, will not be printed if
+that is set (nor wlll an error code of 0, consider both "reserved"
+although you can change the default code of 100, see SetDefaultErrCode()
+if needed).
+
 ## Environment settings
 There are some environment variables that can control the 'out' package
 dynamically.  These are mostly useful for running a tool that uses this
@@ -560,8 +809,9 @@ screen or logfile output flags to add more meta-data for troubleshooting:
 
    One can also use the out.SetStackTraceConfig() API to set preferences within
    your tools.  The starting/default setting for this is:
+
 ```go
-     out.SetStackTraceConfig(out.ForLogfile,out.StackTraceNonZeroErrorExit)
+     out.SetStackTraceConfig(out.ForLogfile|out.StackTraceNonZeroErrorExit)
 ```
    So non-zero exits get dumped to your log file assuming one is configured
    to receive logging data at the right output thresholds and such.
