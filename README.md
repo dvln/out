@@ -642,7 +642,7 @@ To create a new detailed error one would use one of the following:
 
 ```text
   Without using error codes:              With using error codes:
-  ------------------------------------_   ----------------------------------------
+  -------------------------------------   ----------------------------------------
   out.NewErr("Some error message")        out.NewErr("Some error message", code)
   out.NewErrf(0, "Some error: %s", msg)   out.NewErrf(code, "Some error: %s", msg)
 ```
