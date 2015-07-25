@@ -662,7 +662,7 @@ func (f replaceMsg) FormatMessage(msg string, outLevel Level, code int, stack st
 // the 'out' package.
 func (f detectDying) FormatMessage(msg string, outLevel Level, code int, stack string, dying bool) (string, int, bool) {
 	if dying {
-		msg = "Looks like we are dying [DYING]"
+		msg = fmt.Sprintf("Looks like we are dying [DYING #%d]", code)
 	}
 	suppressOutputMask := 0
 	suppressNativePrefixing := false
@@ -750,7 +750,7 @@ func TestFormatter(t *testing.T) {
 	// Grab that error from the buffer and check it out
 	screenErrStr = screenBuf.String()
 	assert.NotContains(t, screenErrStr, "Stack Trace:")
-	assert.Contains(t, screenErrStr, "Looks like we are dying [DYING]")
+	assert.Contains(t, screenErrStr, "Looks like we are dying [DYING #1205]")
 
 	// Reset the most common things for the 'out' pkg so the next test
 	// func will operate sanely as if we're coming in fresh

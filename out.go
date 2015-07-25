@@ -1176,9 +1176,13 @@ func Fatalf(format string, v ...interface{}) {
 }
 
 // Exit is meant for terminating without messaging but supporting stack trace
-// dump settings and such if non-zero exit.
+// dump settings and such (*only* if non-zero exit).
 func Exit(exitVal int) {
-	FATAL.exit(exitVal)
+	if exitVal != 0 {
+		FATAL.exit(exitVal)
+	} else {
+		INFO.exit(exitVal)
+	}
 }
 
 // SetStackTraceConfig can be used to control when stack traces are dumped
@@ -1195,7 +1199,7 @@ func Exit(exitVal int) {
 // Combine a flag from each of the above to indicate how you wish stack traces
 // to be handled by Issue*/Error*/Fatal* and related mechanisms (0=no stack msg)
 // One can also use the env PKG_OUT_STACK_TRACE_CONFIG set to comma separated
-// settings, eg: "screen,nonzeroerrorexit" or "both,warning", if invalid
+// settings, eg: "screen,nonzeroerrorexit" or "both,allissues", if invalid
 // it will be ignored and no stack traces will dump based on the env settings.
 // Note: One cannot, now, differentiate stack trace settings between screen and
 // logfile settings (ie: you currently cannot have stack traces to the logfile
@@ -1224,7 +1228,7 @@ func getStackTrace(detErr DetailedError, depth ...int) string {
 		var origStack string
 		shallow := false
 		fillErrorInfo(detErr, shallow, &errLines, &origStack)
-		myStack = "\n\nStack Trace: " + origStack
+		myStack = "\nStack Trace: " + origStack + "\n"
 	} else {
 		// Not a DetailedError, lets get a stack trace relative to the call
 		// to the 'out' pkg API (eg: out.Error("whatever"), where user called)
@@ -1233,7 +1237,7 @@ func getStackTrace(detErr DetailedError, depth ...int) string {
 			myDepth = depth[0]
 		}
 		trace, _ := stackTrace(myDepth)
-		myStack = fmt.Sprintf("\n\nStack Trace: %s", trace)
+		myStack = fmt.Sprintf("\nStack Trace: %s\n", trace)
 	}
 	return myStack
 }
@@ -1406,10 +1410,10 @@ func (o *LvlOutput) stackTraceWanted(terminal bool, exitVal int, outputTgt int) 
 					newCfg = newCfg | StackTraceNonZeroErrorExit
 				case "errorexit":
 					newCfg = newCfg | StackTraceErrorExit
-				case "allissues":
-					fallthrough
-				case "all":
+				case "allissues", "all":
 					newCfg = newCfg | StackTraceAllIssues
+				case "off":
+					newCfg = 0
 				default:
 				}
 			}
@@ -1894,21 +1898,41 @@ func (o *LvlOutput) stringOutput(s string, dying bool, exitVal int, detErrs ...D
 	var err error
 	var screenLength int
 	var logfileLength int
-	var stacktrace string
+
 	// Grab the best stack trace we can find to use in case it's needed, but
 	// only for Issue, Error and Fatal levels of output (currently)... pass
 	// through any detailed error given by the user
+	var stackTrace, screenStackTrace, logfileStackTrace string
 	if o.level >= LevelIssue {
-		stacktrace = getStackTrace(detErr)
+		stackTrace = getStackTrace(detErr)
+		screenStackTrace = stackTrace
+		logfileStackTrace = stackTrace
+		if !o.stackTraceWanted(dying, exitVal, ForScreen) {
+			screenStackTrace = ""
+		}
+		if !o.stackTraceWanted(dying, exitVal, ForLogfile) {
+			logfileStackTrace = ""
+		}
 	}
+
 	outputSkipMask := 0
 	skipNativePfx := false
 	if o.formatter != nil {
 		// If the client has registered a formatting interface method then
-		// lets give it a buzz, may adjust the output or suppress it alltogether
-		// to the screen and/or logfile
-		s, outputSkipMask, skipNativePfx = o.formatter.FormatMessage(s, o.level, 100, stacktrace, dying)
+		// lets give it a spin, may adjust the output or suppress it alltogether
+		// to the screen and/or logfile.  Right now it gets the generic stack
+		// trace but usually one wouldn't want to use it since the built-in
+		// formatting (below) will add the stack trace and timestamps and such
+		// to the clients returned message (unless told not to)... but if that
+		// is suppressed perhaps the clients wants to do something with it in
+		// their newly formatted message... perhaps not.
+		code := int(DefaultErrCode())
+		if detErr != nil {
+			code = GetCode(detErr)
+		}
+		s, outputSkipMask, skipNativePfx = o.formatter.FormatMessage(s, o.level, code, stackTrace, dying)
 	}
+
 	// Lets see if screen (here) or logfile (below) output is active:
 	if o.level >= screenThreshold && o.level != LevelDiscard && outputSkipMask&ForScreen == 0 {
 		// Screen output active based on output levels (and formatters, if any)
@@ -1916,11 +1940,11 @@ func (o *LvlOutput) stringOutput(s string, dying bool, exitVal int, detErrs ...D
 		// Note that suppressOutput is for suppressing trace/debug output so
 		// only selected/desired packages have debug output dumped (currently)
 		if !suppressOutput {
-			pfxStacktrace := ""
-			if stacktrace != "" {
-				pfxStacktrace, _ = o.doPrefixing(stacktrace, ForScreen, SmartInsert, detErr, skipNativePfx)
+			pfxStackTrace := ""
+			if screenStackTrace != "" {
+				pfxStackTrace, _ = o.doPrefixing(screenStackTrace, ForScreen, SmartInsert, detErr, skipNativePfx)
 			}
-			screenLength, err = o.writeOutput(pfxScreenStr, ForScreen, dying, exitVal, pfxStacktrace)
+			screenLength, err = o.writeOutput(pfxScreenStr, ForScreen, dying, exitVal, pfxStackTrace)
 			if err != nil {
 				return screenLength, err
 			}
@@ -1936,11 +1960,11 @@ func (o *LvlOutput) stringOutput(s string, dying bool, exitVal int, detErrs ...D
 		// Note that suppressOutput is for suppressing trace/debug output so
 		// only selected/desired packages have debug output dumped (currently)
 		if !suppressOutput {
-			pfxStacktrace := ""
-			if stacktrace != "" {
-				pfxStacktrace, _ = o.doPrefixing(stacktrace, ForLogfile, SmartInsert, detErr, skipNativePfx)
+			pfxStackTrace := ""
+			if logfileStackTrace != "" {
+				pfxStackTrace, _ = o.doPrefixing(logfileStackTrace, ForLogfile, SmartInsert, detErr, skipNativePfx)
 			}
-			logfileLength, err = o.writeOutput(pfxLogfileStr, ForLogfile, dying, exitVal, pfxStacktrace)
+			logfileLength, err = o.writeOutput(pfxLogfileStr, ForLogfile, dying, exitVal, pfxStackTrace)
 			if err != nil {
 				return logfileLength + screenLength, err
 			}
