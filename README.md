@@ -4,20 +4,18 @@ out
 A package for "leveled", easily "mirrored" (eg: logfile/buffer) and optionally
 "augmented" (eg: pid, date/timestamp, Go file/func/line# data, etc) CLI output
 stream management.  Designed for easy drop-in 'fmt' replacement with no setup
-required for all your output (eg: fmt.Println, fmt.Print and fmt.Printf would
+required for all your output.  Eg: fmt.Println, fmt.Print and fmt.Printf would
 become out.Println, out.Print and out.Printf but with ability to also output
 at various other levels like out.Verboseln, out.Debugf, out.Fatal, out.Issue,
-out.Noteln, out.Printf, etc.  One can also access/adjust the screen and logfile
-io.Writer's for any output target (screen/logfile) or level.
+out.Noteln, out.Printf, etc.  One can also flexibly adjust screen and log file
+io.Writer settings to send output anywhere (or shut it off).
 
 Note that for debug and trace output levels (ie: trace = verbose debug) one can also
-control which of your Go package(s) or function(s) have their debug info dumped.
+control which of your Go package(s) or function(s) will have debug info displayed.
 By default all debug data is printed (if your output thresholds indicate to print
-it of course) but using the debug scope one can restrict that firehose to specific
-code areas when that is helpful.  See the env vars section at the bottom.
-
-Thanks much to the Go community for ideas, open packages, etc to form some of these
-ideas (particularly the Go authors, spf13 and the Dropbox folks).
+it of course) but using the debug scope one can dynamically restrict any tool using
+this package to only desired code areas when that is helpful.  See the env vars
+section at the bottom for details.
 
 Example fake CLI tool that takes a JSON config file (setting there says to turn
 on "record", ie: a log file, with default log file output flags) and what the
@@ -65,18 +63,28 @@ error interface and, themselves, are interfaces that one can augment.  One can a
 check Go stdlib or pkg related standard Go error values for equivalence against a
 detailed error (and if that regular Go error was wrapped it will match).  One can
 optionally use error codes (numbers) in these detailed errors as well (and match
-on error code as well if used).  If using detailed errors the issue/error/fatal
-output streams will take advantage of them and show the best stack trace and
-combine the errors, incorporating any error codes used as well.  If not used,
-no problem.
+on error code as well).  If using detailed errors the Issue, Error, and Fatal
+output levels will take advantage of them and show the best stack trace and
+combined messages, incorporating any error codes used as well (if error codes
+are used then "Error: " prefixes become "Error #1004: " automatically, same for
+Issue and Fatal level output).  If not used, no problem.
 
 The goal is flexible control of output streams and how they can be marked
 up, dynamically redirected, augmented with meta-data to help with support
 or troubleshooting, etc.  If something fancier is needed one can dynamically
-plug in your own output formatter as well with this package.  I use this to
-dump output in text and JSON form so any errors that come up from anywhere
-in my code will be dumped in a JSON format when in that output mode or text
-if in that mode via a formatting "callback/plugin" capability.  Summary:
+plug in your own output formatter with this package to override or augment
+the built-in output prefixes and flags.  For example, my tool has a text and
+JSON output mode.  I use this feature when in JSON mode to control error
+Issues, Errors or Fatals so they tie into the JSON infrastructure and return
+valid JSON containing errors or warnings (vs simple text messages).  These
+formatters can completely suppress the "native" 'out' package output for
+either the screen or log file or both output streams (eg: my JSON package
+does this for warnings, pushing them into the JSON structure I'll dump at
+the end so I "stash" them in the JSON output structure and tell the 'out'
+package not to print them or log them since the final JSON output dump will
+include them).
+
+Summary:
 
 1. Ready for basic CLI screen output with levels out of the box, no setup
 2. Easy drop-in replacement for fmt.Print[f|ln](), plus level specific func's
@@ -88,10 +96,13 @@ if in that mode via a formatting "callback/plugin" capability.  Summary:
 8. Ability to limit debug/trace output to specific pkg(s) or function(s)
 9. Ability to easily add stack trace on issues/errors/fatal's (dying/non-zero or not)
 10. Goal is to be "safe" for concurrent use (if you see problems please open a git issue)
-11. Support for plugin formatters to roll your own format (can even support JSON output modes)
+11. Support for plugin formatters to roll your own format (or support other output mechanisms)
 12. Optional: "detailed" errors type adds stack from orig error instance, wrapping of errors
 
 Note: more examples on the last couple of options will be forthcoming.
+
+Thanks much to the Go community for ideas, open packages, etc to form some of these
+ideas (particularly the Go authors, spf13 and the Dropbox folks).
 
 # Usage
 
