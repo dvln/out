@@ -99,8 +99,6 @@ Summary:
 11. Support for plugin formatters to roll your own format (or support other output mechanisms)
 12. Optional: "detailed" errors type adds stack from orig error instance, wrapping of errors
 
-Note: more examples on the last couple of options will be forthcoming.
-
 Thanks much to the Go community for ideas, open packages, etc to form some of these
 ideas (particularly the Go authors, spf13 and the Dropbox folks).
 
