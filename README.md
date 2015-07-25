@@ -141,14 +141,14 @@ The default settings add default "prefixes" on some of the messages, the
 defaults for "screen" output are:
 
 ```text
-  Trace level (stdout):           "\<date/time\> Trace: \<msg\>"
-  Debug level (stdout):           "\<date/time\> Debug: \<msg\>"
-  Verbose level (stdout):         "\<msg\>""
-  *Default*: Info|Print (stdout): "\<msg\>"
-  Note level (stdout):            "Note: \<msg\>"
-  Issue level (stdout):           "Issue: \<msg\>"
-  Error level (stderr):           "Error: \<msg\>"
-  Fatal level \[stack\] (stderr):   "Fatal: \<msg\>"
+  Trace level (stdout):           "<date/time> Trace: <msg>"
+  Debug level (stdout):           "<date/time> Debug: <msg>"
+  Verbose level (stdout):         "<msg>""
+  *Default*: Info|Print (stdout): "<msg>"
+  Note level (stdout):            "Note: <msg>"
+  Issue level (stdout):           "Issue: <msg>"
+  Error level (stderr):           "Error: <msg>"
+  Fatal level [stack] (stderr):   "Fatal: <msg>"
 
 ```
 
@@ -163,14 +163,14 @@ set a log file up using provided API's (as below) then the default log file
 output will kick on and behave as follows:
 
 ```text
-   Trace level:         "\[\<pid\>\] TRACE   \<date/time\> \<shortfile:line#:shortfunc\> Trace: \<msg\>"
-   Debug level:         "\[\<pid\>\] DEBUG   \<date/time\> \<shortfile:line#:shortfunc\> Debug: \<msg\>"
-   Verbose level:       "\[\<pid\>\] VERBOSE \<date/time\> \<shortfile:line#:shortfunc\> \<msg\>"
-   Info|Print level:    "\[\<pid\>\] INFO    \<date/time\> \<shortfile:line#:shortfunc\> \<msg\>"
-   Note level:          "\[\<pid\>\] NOTE    \<date/time\> \<shortfile:line#:shortfunc\> Note: \<msg\>"
-   Issue level:         "\[\<pid\>\] ISSUE   \<date/time\> \<shortfile:line#:shortfunc\> Issue: \<msg\>"
-   Error level:         "\[\<pid\>\] ERROR   \<date/time\> \<shortfile:line#:shortfunc\> Error: \<msg\>"
-   Fatal level \[stack\]: "\[\<pid\>\] FATAL   \<date/time\> \<shortfile:line#:shortfunc\> Fatal: \<msg\>"
+   Trace level:         "[<pid>] TRACE   <date/time> <shortfile:line#:shortfunc> Trace: <msg>"
+   Debug level:         "[<pid>] DEBUG   <date/time> <shortfile:line#:shortfunc> Debug: <msg>"
+   Verbose level:       "[<pid>] VERBOSE <date/time> <shortfile:line#:shortfunc> <msg>"
+   Info|Print level:    "[<pid>] INFO    <date/time> <shortfile:line#:shortfunc> <msg>"
+   Note level:          "[<pid>] NOTE    <date/time> <shortfile:line#:shortfunc> Note: <msg>"
+   Issue level:         "[<pid>] ISSUE   <date/time> <shortfile:line#:shortfunc> Issue: <msg>"
+   Error level:         "[<pid>] ERROR   <date/time> <shortfile:line#:shortfunc> Error: <msg>"
+   Fatal level [stack]: "[<pid>] FATAL   <date/time> <shortfile:line#:shortfunc> Fatal: <msg>"
 
 ```
 
