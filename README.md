@@ -6,12 +6,12 @@ A package for "leveled", easily "mirrored" (eg: logfile/buffer) and optionally
 stream management.  Designed to be a trivial drop-in replacement with no setup
 required for all your output (eg: fmt.Println, fmt.Print and fmt.Printf would
 become out.Println, out.Print and out.Printf with ability to also output at
-various other levels like out.Verboseln or out.Debugf or out.Fatal or out.Issue
-and various other levels).  One can also access an io.Writer for any output
-level (if needed).  For debug and trace (ie: trace = verbose debug) level
-output one can also control which package(s) or function(s) have their debug
-info dumped.  This reduces debug output to only those areas of code one wishes
-to focus on (if desired).
+various other levels like out.Verboseln, out.Debugf, out.Fatal, out.Issue,
+out.Noteln, out.Printf, etc.  One can also access/adjust the screen and logfile
+io.Writer's for any output level.  For debug and trace (ie: trace = verbose debug)
+level output one can also control which package(s) or function(s) have their debug
+info dumped (by default all debug data is dumped).  This can reduce debug output to
+only those areas of code one wishes to focus on.
 
 I've written CLI tools in the past where I wanted greater control of where I
 send my output stream and how that stream might be dynamically "marked up",
@@ -22,29 +22,28 @@ independently, with additional meta-data (pid, date/timestamp, file/func info,
 output level) and have all output remain cleanly aligned is very helpful for
 troubleshooting.  Additionally, giving tool owners (or clients) the ability
 to control what output "levels" are active and which pieces, if any, of add-on
-meta-data are visible independently to each output stream adds value.
+meta-data are visible independently to each output stream adds value as does
+the ability to dump stack traces on warnings and exits if/when desired and
+to whichever output stream(s) desired.
 
-This started life as a wrapper around the Go standard 'log' library allowing two
-Loggers to be independently controlled (one typically writing to the screen and
-one to a log file), based on spf13's jwalterweatherman package (but looking to
-give more independent control of screen vs log file meta-data and such)... but
-upon further use I found 'log' to be too limiting in how it formats output and
-jww to be a bit too restrictive via it's io.Multiwriter use (same with log) in
-that I was not able to independently control the output stream levels and markup
-meta-data and such.  Hence, this package was created with these goals in mind:
+Thanks much to spf13 (jwalterweatherman, etc), the Go authors (the log package)
+as well as Dropbox folks and their open error package.  Ideas from these and
+others have been munged together to create this package.
 
 1. Ready for basic CLI screen output with levels out of the box, no setup
 2. Easy drop-in replacement for fmt.Print[f|ln](), plus level specific func's
 3. Trivial to "turn on" logging (output mirroring) to a temp or named log file
 4. Independent io.Writer control over the two output streams (eg: screen/logfile)
 5. Independent output level thresholds for each target (eg: screen and logfile)
-6. Independent control over flags (ie: add metadata like date/time, file/line#)
-7. Access to io.Writer for any output level (streams/markup based on curr setup)
-8. Clean alignment and handling for multi-line strings or strings w/no newlines
-9. "Smarter" insertion of newlines into the screen or log file io.Writers
-10. Ability to limit debug/trace output to specific pkg(s) or function(s)
-11. Ability to easily add stack trace on non-zero exit (eg: Fatal) class errors
-12. Attempts to be "safe" for concurrent use (currently lacks thorough testing)
+6. Independent control over flags (eg: augment log file with date/time, file/line#, etc)
+7. Clean alignment and handling for multi-line strings or strings w/no newlines
+8. Ability to limit debug/trace output to specific pkg(s) or function(s)
+9. Ability to easily add stack trace on issues/errors/fatal's (dying/non-zero or not)
+10. Goal is to be "safe" for concurrent use (if you see problems please open a git issue)
+11. Support for plugin formatters to roll your own format (can even support JSON output modes)
+12. Optional: "detailed" errors type adds stack from orig error instance, wrapping of errors
+
+Note: more documents on the last couple of options will be forthcoming.
 
 # Usage
 
@@ -66,26 +65,26 @@ other usually targeted towards log file output (default is to discard log file
 output until it is configured, see below).  One can, of course, redirect either
 or both of these output streams anywhere via io.Writers (or multi-Writers).
 One can also send output to the two output streams via an io.Writer at the
-desired level, there are a couple ways to get a writer but the easiest way
-is to use out.TRACE, out.DEBUG, out.VERBOSE, out.INFO, out.NOTE, out.ISSUE,
-out.ERROR, out.FATAL directly:
+desired level.  There are a couple ways to get a writer but the easiest way
+is direct: out.TRACE, out.DEBUG, out.VERBOSE, out.INFO, out.NOTE, out.ISSUE,
+out.ERROR, out.FATAL, eg:
 
  * fmt.Fprintf(out.DEBUG, "%s", someDebugString)    (same as out.Debug(..))
  * fmt.Fprintf(out.INFO, "%s", someString)          (same as out.Print|out.Info)
  * ...
 
-One can use an API to get a writer based on a Level type if desired:
+One can also access the writers via API but not as easy as the above:
 
  * fmt.Fprintf(out.GetWriter(out.LevelInfo), "%s", someString)
  * fmt.Fprintf(out.GetWriter(out.LevelDebug), "%s", someDebugString)
  * ...
 
-Just like the function calls the io.Writer for any level goes to the same two
-underlying io.Writers.  Also like the function all interface the output to those
-two writers and any attached meta-data functions the same (ie: you'll get output
-if the selected output level is high enough based on your thresholds, etc).
+One can additionally override the screen and logfile io.Writers for any
+output level via SetWriter(), see below.  Keep in mind that you may need
+to adjust the output thresholds so you actually see output once a writer
+is set, see SetThreshold() below.
 
-An example of standard usage via the functions:
+An example of standard usage:
 
 ```go
     import (
@@ -115,68 +114,65 @@ An example of standard usage via the functions:
     }
     ...
     if err != nil {
-        // This is a fatal error, lets also add in a stack trace as maybe
-        // this one should never happen and we'll need to troubleshoot:
-		out.SetStacktraceOnExit(true)
+        // This is a fatal error that we want a stack trace for our screen
+        // output for (could use ForLogfile or ForBoth as well)... and one
+        // can indicate non-zero exits (as below), any error exit via the
+        // "StackTraceErrorExit" setting or via StackTraceAllIssues one can
+        // cause a trace for any type of warning/error (Issue/Error/Fatal):
+        // Note: the env PKG_OUT_STACK_TRACE_CONFIG can be used as alternative
+        //       dynamic way to kick on stack traces without using the API
+        //       call below for SetStackTraceConfig().. eg:  set the env
+        //       var to "screen,allissues" or "both,nonzeroerrorexit" or
+        //       perhaps "logfile,allissues" to kick it on).  For the API:
+		out.SetStackTraceConfig(out.ForScreen|out.StackTraceNonZeroErrorExit)
         out.Fatalln(err)
     }
 
 ```
 
 There are 8 output levels (perhaps too many for most folks) but one can, of
-course, just use those that a given product needs.  Personally I like debug
-and verbose CLI options in my tools such that if debug is used then Debug level
-for output is set, if debug and verbose both are used then Trace level (more
-verbose debugging) is set up, and if just Verbose then Verbose level, etc.  I
-use a "record" or "logfile" type option for logging if desired and one can use
-things like a "quiet" or "silent" option to only see errors or important notes.
-Use whatever works for your tool and simply adjust the 'out' package levels to
-match.  If your needs are more basic check out Go's "log" and "fmt" packages
-for basic output control or something like spf13's jwalterweatherman (jww)
-package on github (github.com/spf13/jWalterWeatherman), it's neat and some of
-the work here is based on ideas from that (thanks to spf13) and the Go 'log'
-package (thanks to the Go authors).
+course, just use those that a given product needs.  There is no need to use
+levels you do not want.
 
-Aside: spf13 also created 'cobra' for easy CLI setup and 'viper' for config file
-and environment variable settings/mgmt (ties in nicely w/cobra).  I've modified
-'viper' to use this 'out' package instead of the original 'jww' package that
-it was using (cobra already uses a writer so no need to tweak it).  Anyhow, see
-the 'github.com/dvln' organization for updated copies with tweaks to those if
-you wish (keep in mind there are other additions you may or may not want).
+Quick note: some packages like spf13's 'viper' have been ported to 'out' in
+my fork of these packages, see:"github.com/dvln/viper" for example.
 
 The default settings add default "prefixes" on some of the messages, the
 defaults for "screen" output are:
 
-1. Trace level (stdout):           "\<date/time\> Trace: \<message\>"
-2. Debug level (stdout):           "\<date/time\> Debug: \<message\>"
-3. Verbose level (stdout):         "\<message\>""
-4. *Default*: Info|Print (stdout): "\<message\>"
-5. Note level (stdout):            "Note: \<message\>"
-6. Issue level (stdout):           "Issue: \<message\>"
-7. Error level (stderr):           "Error: \<message\>"
-8. Fatal level \[stack\] (stderr):   "Fatal: \<message\>"
+```text
+  Trace level (stdout):           "\<date/time\> Trace: \<msg\>"
+  Debug level (stdout):           "\<date/time\> Debug: \<msg\>"
+  Verbose level (stdout):         "\<msg\>""
+  *Default*: Info|Print (stdout): "\<msg\>"
+  Note level (stdout):            "Note: \<msg\>"
+  Issue level (stdout):           "Issue: \<msg\>"
+  Error level (stderr):           "Error: \<msg\>"
+  Fatal level \[stack\] (stderr):   "Fatal: \<msg\>"
 
-The built-in names for these output levels can't be changed (unless you tweak
-the code) but everything visible to the client can be such as if you want the
-Issue level to instead print "Warning: " (ie: instead of "Issue: ") that is
-not a problem (see SetPrefix).  If you want no prefix or if you want time/date
-info turned on/off that's also doable.  If you want everything to go to stdout
-or if you want to change the default threshold to Verbose instead of Print/Info,
-no problem.  Various adjustments via the API are covered below.
+```
+
+You can change anything about the default output values, prefixes, flags, etc and
+even adjust where the output is sent.  You cannot adjust the hidden built-in
+variable names used by API's and such (eg: LevelIssue), but all visible/output
+can be adjusted.
 
 For the default log file output we start with an ioutil.Discard for the
 io.Writer which effectively means /dev/null to begin with.  However, if you
 set a log file up using provided API's (as below) then the default log file
 output will kick on and behave as follows:
 
-1. Trace level:         "\[\<pid\>\] TRACE   \<date/time\> \<shortfile:line#:shortfunc\> Trace: \<message\>"
-2. Debug level:         "\[\<pid\>\] DEBUG   \<date/time\> \<shortfile:line#:shortfunc\> Debug: \<message\>"
-3. Verbose level:       "\[\<pid\>\] VERBOSE \<date/time\> \<shortfile:line#:shortfunc\> \<message\>"
-4. Info|Print level:    "\[\<pid\>\] INFO    \<date/time\> \<shortfile:line#:shortfunc\> \<message\>"
-5. Note level:          "\[\<pid\>\] NOTE    \<date/time\> \<shortfile:line#:shortfunc\> Note: \<message\>"
-6. Issue level:         "\[\<pid\>\] ISSUE   \<date/time\> \<shortfile:line#:shortfunc\> Issue: \<message\>"
-7. Error level:         "\[\<pid\>\] ERROR   \<date/time\> \<shortfile:line#:shortfunc\> Error: \<message\>"
-8. Fatal level \[stack\]: "\[\<pid\>\] FATAL   \<date/time\> \<shortfile:line#:shortfunc\> Fatal: \<message\>"
+```text
+   Trace level:         "\[\<pid\>\] TRACE   \<date/time\> \<shortfile:line#:shortfunc\> Trace: \<msg\>"
+   Debug level:         "\[\<pid\>\] DEBUG   \<date/time\> \<shortfile:line#:shortfunc\> Debug: \<msg\>"
+   Verbose level:       "\[\<pid\>\] VERBOSE \<date/time\> \<shortfile:line#:shortfunc\> \<msg\>"
+   Info|Print level:    "\[\<pid\>\] INFO    \<date/time\> \<shortfile:line#:shortfunc\> \<msg\>"
+   Note level:          "\[\<pid\>\] NOTE    \<date/time\> \<shortfile:line#:shortfunc\> Note: \<msg\>"
+   Issue level:         "\[\<pid\>\] ISSUE   \<date/time\> \<shortfile:line#:shortfunc\> Issue: \<msg\>"
+   Error level:         "\[\<pid\>\] ERROR   \<date/time\> \<shortfile:line#:shortfunc\> Error: \<msg\>"
+   Fatal level \[stack\]: "\[\<pid\>\] FATAL   \<date/time\> \<shortfile:line#:shortfunc\> Fatal: \<msg\>"
+
+```
 
 Again, all of this is adjustable so check out the next section.  To activate
 a log file, as you'll see below, these are the two things to do:
