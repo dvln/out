@@ -734,7 +734,7 @@ It would use the "highest" error code (3010) for the message although IsError()
 would match on 2040 and 3010 both as well as the original system error.  The
 output of the Fatal call would be something like:
 
-```go
+```text
 Fatal #3010: Tool unable to complete requested task.
 Fatal #3010: Failure occurred during "middle functionality".
 Fatal #3010: Problem: related to opening mytool config file:
