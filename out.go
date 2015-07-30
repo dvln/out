@@ -1304,8 +1304,9 @@ func (o *LvlOutput) stackTraceWanted(terminal bool, exitVal int, outputTgt int) 
 // dump that stacktrace as well (honoring all log levels and such),
 // see getStackTrace() for the env and package settings honored.
 func (o *LvlOutput) exit(exitVal int) {
-	// get the stacktrace if it's configured
-	stacktrace := getStackTrace(nil)
+	// get the stacktrace if it's configured, note that the depth is
+	// a little shallower if coming straight through Exit() to here:
+	stacktrace := getStackTrace(nil, int(CallDepth())-1)
 	terminal := true
 	if stacktrace != "" && o.stackTraceWanted(terminal, exitVal, ForScreen) && o.level >= screenThreshold && o.level != LevelDiscard {
 		msg, suppressOutput := o.doPrefixing(stacktrace, ForScreen, SmartInsert, nil, false)
@@ -1713,6 +1714,9 @@ func (o *LvlOutput) writeOutput(s string, outputTgt int, dying bool, exitVal int
 			writeErr := fmt.Errorf("%sError writing newline to %s output handler:\n%+v\n", o.prefix, tgtString, err)
 			return writeLength, writeErr
 		}
+		// normally we're dying so this doesn't matter but in testing we can
+		// suppress the dying/exit so lets put 'out' into the right state
+		*tgtStreamNewline = true
 	}
 	// See if stack trace is needed...
 	if o.stackTraceWanted(dying, exitVal, outputTgt) {
@@ -1749,11 +1753,11 @@ func (o *LvlOutput) stringOutput(s string, dying bool, exitVal int, detErrs ...D
 	// Grab the best stack trace we can find to use in case it's needed, but
 	// only for Issue, Error and Fatal levels of output (currently)... pass
 	// through any detailed error given by the user
-	var stackTrace, screenStackTrace, logfileStackTrace string
+	var stackStr, screenStackTrace, logfileStackTrace string
 	if o.level >= LevelIssue {
-		stackTrace = getStackTrace(detErr)
-		screenStackTrace = stackTrace
-		logfileStackTrace = stackTrace
+		stackStr = getStackTrace(detErr)
+		screenStackTrace = stackStr
+		logfileStackTrace = stackStr
 		if !o.stackTraceWanted(dying, exitVal, ForScreen) {
 			screenStackTrace = ""
 		}
@@ -1777,13 +1781,14 @@ func (o *LvlOutput) stringOutput(s string, dying bool, exitVal int, detErrs ...D
 		if detErr != nil {
 			code = Code(detErr)
 		}
-		s, outputSkipMask, skipNativePfx = o.formatter.FormatMessage(s, o.level, code, stackTrace, dying)
+		s, outputSkipMask, skipNativePfx = o.formatter.FormatMessage(s, o.level, code, stackStr, dying)
 	}
 
 	// Lets see if screen (here) or logfile (below) output is active:
 	if o.level >= screenThreshold && o.level != LevelDiscard && outputSkipMask&ForScreen == 0 {
 		// Screen output active based on output levels (and formatters, if any)
 		pfxScreenStr, suppressOutput := o.doPrefixing(s, ForScreen, SmartInsert, detErr, skipNativePfx)
+
 		// Note that suppressOutput is for suppressing trace/debug output so
 		// only selected/desired packages have debug output dumped (currently)
 		if !suppressOutput {
@@ -1888,7 +1893,7 @@ func (o *LvlOutput) Write(p []byte) (n int, err error) {
 // non-empty (based on stack traces I've seen and the parsing below I think
 // it will always be empty but I might be missing something)
 // NOTE: This can panic if any error (eg: runtime stack trace gathering issue)
-func stackTrace(skip int) (current, context string) {
+func stackTrace(skip int) (string, string) {
 	// grow buf until it's large enough to store entire stack trace
 	buf := make([]byte, 128)
 	for {
