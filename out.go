@@ -34,17 +34,24 @@
 //
 // - Stack traces on issues/errors/fatals easily available (via env or api)
 //
-// - extended errors with "closer to the issue" stack tracing, error codes
+// - Extended errors with "closer to the issue" stack tracing, error codes
 // (optional/extensible), error "stacking/wrapping" still providing easy
 // "constant" error matching matching from Go stdlib packages
 //
-// - Custom formatters if existing formatting options are not enough, can
+// - Custom formatter: if existing formatting options are not enough, can
 // be used to produce custom output formats or even do things like suppress
 // output while pushing that into some other mechanism (eg: if in JSON output
 // mode push output into the pkg forming up the JSON response so errors show
 // up in JSON output or warnings are stored there, etc)
 //
-// - Future: github.com/dvln/in for prompting/paging, to work w/this package
+// - Ability to set up a "deferred" function that will be called just before
+// os.Exit is called (assumes you are exiting via out.Exit(), out.Fatal() and
+// related out mechanisms for exitting), receives exit value for tool.  Eg: use
+// this when client uses a tool generated tmp logfile name to record the tools
+// output... so the tmp logfile name is printed at the bottom of their output
+// just before exit and so the note is sent only to the screen on STDERR.
+//
+// - Future: github.com/dvln/in for prompting/paging
 //
 // The 'out' package is designed as a singleton (currently) although one could
 // make it more generic... but as I have no need for that currently I've avoided
@@ -326,6 +333,13 @@ var (
 	// errorExitVal is the default exit value used by Fatal()* routines which
 	// are not given an exit value to use
 	errorExitVal int32 = -1
+
+	// deferFunc is a func pointer to a func that takes no params and returns
+	// nothing of use, if set it is called immediately before exit (often used
+	// for printing final messages with stat's/timing or perhaps a note on
+	// a temp output logfile name so it's visible at the end of a run, etc),
+	// See DeferFunc() and SetDeferFunc() to get and set this if desired.
+	deferFunc func(exitVal int)
 )
 
 // levelCheck insures valid log level "values" are provided
@@ -338,6 +352,26 @@ func levelCheck(level Level) Level {
 	default:
 		return level
 	}
+}
+
+// DeferFunc returns a function type (reference type) if a defer func has
+// been set, see SetDeferFunc(), otherwise nil.  A defer function is one that
+// is fired right before os.Exit() is called by the'out' package.
+func DeferFunc() func(exitVal int) {
+	return deferFunc
+}
+
+// SetDeferFunc sets a single deferred funtion that is called right before
+// the out package exits (if one is configured).  The function reference
+// passed in should have a signature of exitVal (int) coming in and nothing
+// being returned.
+func SetDeferFunc(dFunc func(exitVal int)) {
+	// Safely adjust the messenger func
+	mutex.Lock()
+	{
+		deferFunc = dFunc
+	}
+	mutex.Unlock()
 }
 
 // Threshold returns the current screen or logfile output threshold level
@@ -1182,6 +1216,9 @@ func (o *LvlOutput) output(terminal bool, exitVal int, v ...interface{}) {
 	_, err := o.stringOutput(msg, terminal, exitVal, detErr)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s", err)
+		if deferFunc != nil {
+			deferFunc(int(errorExitVal))
+		}
 		if os.Getenv("PKG_OUT_NO_EXIT") != "1" {
 			os.Exit(int(errorExitVal))
 		}
@@ -1204,6 +1241,9 @@ func (o *LvlOutput) outputln(terminal bool, exitVal int, v ...interface{}) {
 	_, err := o.stringOutput(msg, terminal, exitVal, detErr)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s", err)
+		if deferFunc != nil {
+			deferFunc(int(errorExitVal))
+		}
 		if os.Getenv("PKG_OUT_NO_EXIT") != "1" {
 			os.Exit(int(errorExitVal))
 		}
@@ -1226,6 +1266,9 @@ func (o *LvlOutput) outputf(terminal bool, exitVal int, format string, v ...inte
 	_, err := o.stringOutput(msg, terminal, exitVal, detErr)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s", err)
+		if deferFunc != nil {
+			deferFunc(int(errorExitVal))
+		}
 		if os.Getenv("PKG_OUT_NO_EXIT") != "1" {
 			os.Exit(int(errorExitVal))
 		}
@@ -1314,8 +1357,11 @@ func (o *LvlOutput) exit(exitVal int) {
 			_, err := o.screenHndl.Write([]byte(msg))
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%sError writing stacktrace to screen output handle:\n%+v\n", o.prefix, err)
+				if deferFunc != nil {
+					deferFunc(int(errorExitVal))
+				}
 				if os.Getenv("PKG_OUT_NO_EXIT") != "1" {
-					os.Exit(1)
+					os.Exit(int(errorExitVal))
 				}
 			}
 		}
@@ -1325,6 +1371,9 @@ func (o *LvlOutput) exit(exitVal int) {
 		if !suppressOutput {
 			o.logfileHndl.Write([]byte(msg))
 		}
+	}
+	if deferFunc != nil {
+		deferFunc(exitVal)
 	}
 	if os.Getenv("PKG_OUT_NO_EXIT") != "1" {
 		os.Exit(exitVal)
@@ -1824,8 +1873,13 @@ func (o *LvlOutput) stringOutput(s string, dying bool, exitVal int, detErrs ...D
 	}
 	// if we're dying off then we need to exit unless overrides in play,
 	// this env var should be used for test suites only really...
-	if dying && os.Getenv("PKG_OUT_NO_EXIT") != "1" {
-		os.Exit(int(errorExitVal))
+	if dying {
+		if deferFunc != nil {
+			deferFunc(int(errorExitVal))
+		}
+		if os.Getenv("PKG_OUT_NO_EXIT") != "1" {
+			os.Exit(int(errorExitVal))
+		}
 	}
 	// if all good return all the bytes we wrote to *both* targets and nil err
 	return logfileLength + screenLength, nil

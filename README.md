@@ -97,7 +97,8 @@ Summary:
 9. Ability to easily add stack trace on issues/errors/fatal's (dying/non-zero or not)
 10. Goal is to be "safe" for concurrent use (if you see problems please open a git issue)
 11. Support for plugin formatters to roll your own format (or support other output mechanisms)
-12. Optional: "detailed" errors type adds stack from orig error instance, wrapping of errors
+12. "Deferred" function can be set to run before exit (eg: summary info, tmp logfile name, etc)
+13. Optional: "detailed" errors type adds stack from orig error instance, wrapping of errors
 
 Thanks much to the Go community for ideas, open packages, etc to form some of these
 ideas (particularly the Go authors, spf13 and the Dropbox folks).
@@ -636,7 +637,56 @@ would get routed through your formatter, adjusting them as desired (and
 possibly suppressing built-in formatting and prefixing and such or even
 preventing output if desired from the 'out' package).
 
-### Using detailed errors for your erroring (optional, not required!!!)
+### Setting up a "deferred" function to call before terminating
+
+One can register a single function to be called just before your tool
+will exit.  This only works if one is always exiting via calls to 'out.Exit()'
+or out.Fatal() or the out.*Exit() functions.  Use is pretty easy:
+
+```go
+// mySummary wraps up my programs output with summary data or perhaps
+// by closing or moving files or rotating logfiles or outputting names
+// of tmp files generated within the tool to capture output.
+func mySummary(exitVal int) {
+    // For our example we'll just note a tmp logfile path/name but we'll
+    // make sure that msg only goes to the screen output on STDERR and is
+    // not written to the logfile output stream... only resets the output
+    // stream if we're writing to stdout, if we're writing to some other
+    // output io.Writer for the note level output we'll just use that:
+    if tmpLogfileMsg != "" {
+        // Send screen note to STDERR if currently it is the default (STDOUT)
+        currWriter := out.Writer(out.LevelNote, out.ForScreen)
+        if currWriter == os.Stdout {
+            out.SetWriter(out.LevelNote, os.Stderr, out.ForScreen)
+
+        }
+
+        // Don't put the tmp logfile note in the logfile itself...
+        currThresh := out.Threshold(out.ForLogfile)
+        out.SetThreshold(out.LevelDiscard, out.ForLogfile)
+
+        out.Noteln(tmpLogfileMsg)
+
+        // To be safe set them back to previous settings (even though exiting)
+        out.SetThreshold(currThresh, out.ForLogfile)
+        out.SetWriter(out.LevelNote, currWriter, out.ForScreen)
+    }
+}
+
+func main () {
+    ...
+    out.SetDeferFunc(mySummary)
+}
+```
+
+If you want to clear it set it to nil via SetDeferFunc() and if you want to
+see if it's currently set and what it is set to use DeferFunc() to get it.
+You should set this up as soon as you have a need for some pre-exit function.
+Again, it will NOT fire for os.Exit() called directly (or indirectly by 
+something like log.Fatal() and such, only works with the 'out' pkg exit
+mechanisms).
+
+### Using detailed errors for your errorring (optional, not required!!!)
 
 To create a new detailed error one would use one of the following:
 
