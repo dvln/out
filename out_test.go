@@ -431,7 +431,7 @@ func TestStackTrace2(t *testing.T) {
 
 	assert.Contains(t, screenBuf.String(), "Issue: user issue\n")
 	assert.Contains(t, screenBuf.String(), "Stack Trace:")
-	assert.Contains(t, screenBuf.String(), "dvln/lib/out.TestStackTrace2")
+	assert.Contains(t, screenBuf.String(), "/out.TestStackTrace2")
 }
 
 func TestLogfileNameSet(t *testing.T) {

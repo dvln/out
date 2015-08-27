@@ -22,10 +22,11 @@ package out
 
 import (
 	"bytes"
-	"dvln/lib/3rd/testify/assert"
 	"fmt"
 	"os"
 	"testing"
+
+	"github.com/dvln/testify/assert"
 )
 
 type killScreenOut struct{}
