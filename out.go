@@ -1924,9 +1924,10 @@ func LevelWriter(l Level) *LvlOutput {
 // level then one might do this to get an io.Writer for that level:
 //   infoWriter := out.LevelWriter(out.LevelInfo)
 //   fmt.Fprintf(infoWriter, "%s\n", stringVar)
-// Note: one could also use the INFO writer directly: 'fmt.Fprintf(INFO, ...)'
+// Note: one could also use the INFO writer directly and more easily:
+//   fmt.Fprintf(out.INFO, "%s\n", stringVar)
 // The above example would print to the screen and any logfile that was set up
-// just like the Info[ln|f]() (or the Print[ln|f]()) routine would.  Keep in
+// just like the Info[ln|f]() (ie: Print[ln|f]()) routine would.  Please keep in
 // mind that if a logfile has been activated this io.Writer will behave somewhat
 // like an io.MultiWriter (writing to multiple target handles potentially, the
 // difference being that here the different target handles can be augmented with

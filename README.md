@@ -1,25 +1,33 @@
 out
 ===
 
-A package for "leveled", easily "mirrored" (eg: logfile/buffer) and optionally
-"augmented" (eg: pid, date/timestamp, Go file/func/line# data, etc) CLI output
-stream management.  Designed for easy drop-in 'fmt' replacement with no setup
-required for all your output.  Eg: fmt.Println, fmt.Print and fmt.Printf would
-become out.Println, out.Print and out.Printf but with ability to also output
-at various other levels like out.Verboseln, out.Debugf, out.Fatal, out.Issue,
-out.Noteln, out.Printf, etc.  One can also flexibly adjust screen and log file
-io.Writer settings to send output anywhere (or shut it off).
+A package for easily used "leveled" output designed to do a lot more than
+Go's log package.  This pkg has two io.Writer streams that are independently
+controlled.  These are typically for screen output (which works out of
+the box) and mirrored log file output which is trivial to set up for a tmp
+or named log file.  With independent control over the output streams one
+can print regular output to the screen while mirroring that to a log file
+or one can easily set the log file output to be at a different output
+level (eg: 'trace' level for verbose debugging) with markup data added
+such as Go file name, func name and line #, date/timestamp, pid, log
+level, etc prefixed.  All flags/metadata are fully configurable (similar
+to Go's log package, just more configuration/markup options).
 
-Note that for debug and trace output levels (ie: trace = verbose debug) one can also
-control which of your Go package(s) or function(s) will have debug info displayed.
-By default all debug data is printed (if your output thresholds indicate to print
-it of course) but using the debug scope one can dynamically restrict any tool using
-this package to only desired code areas when that is helpful.  See the env vars
-section at the bottom for details.
+Basically ones call to 'fmt.Println()' or 'log.Printf()' would be replaced
+with an 'out.Println()' and 'out.Printf()'.  If one wanted to use different
+levels one could use 'out.Debugln()' or 'out.Notef()' or various other
+output levels just as easily with the 'out.<Level>[ln|f]()' format.  One
+can do additional things as well, a few examples:
 
-Example fake CLI tool that takes a JSON config file (setting there says to turn
-on "record", ie: a log file, with default log file output flags) and what the
-screen and logfile data might look like by default:
+1. Errors could be set up to be shown in human format or JSON (see formatters)
+2. Trim/filter debugging output to specific packages or even package functions
+3. Optional "detailed" errors to get stack traces near orig error occurance
+4. Cleaner log file vs screen output formatting/alignment (vs Go 'log' pkg)
+5. Augment screen and/or logged data with more extensive meta-data markup options
+6. All of these are optional but add power if needed, more below ...
+
+A CLI tool that uses 'out' can easly have screen output that looked something
+like the following while the log file output showed more detail:
 
 ```text
 % cat ~/.mytool/cfg.json 
@@ -42,63 +50,46 @@ Error: Problem x indicated
 
 ```
 
-Screen output is clean, in the logfile one sees details about each line of
+Screen output is clean, in the log file one sees details about each line of
 screen output such as the pid, the general output level (print=info), the
 date/time, the go file and line # for each output call as well as the function
 name... along with the output formatted to align fairly well so it's easy to
-compare the log output to the screen output (and see what the user sees).  If
+compare the log output to the screen output (ie: see what the user sees).  If
 long filenames were desired with pkg name info that is available as well, same
-with longer function name information.  If configured trace/debug could be
-added to the logfile output stream while not showing them on the users screen
+with longer function name information.  If desired trace/debug could be easily
+added to the log file output stream while not showing them on the users screen
 stream.  Independent control can be powerful.
 
-Also builtin is an implementation of "detailed" errors.  These are optional
-and can be used for new errors or to wrap Go errors (or themselves)... so they
-are "nested" and one can stack errors as one backs out of a function/method
-hierarchy.  All stacked errors will dump the most recent error with any earlier
-errors shown under it and the stack trace used will be from the oldest error that
-can be found (where the error chain started, gives the most detailed stack trace).
-This can greatly help in troubleshooting.  Detailed errors implement the standard
-error interface and, themselves, are interfaces that one can augment.  One can also
-check Go stdlib or pkg related standard Go error values for equivalence against a
-detailed error (and if that regular Go error was wrapped it will match).  One can
-optionally use error codes (numbers) in these detailed errors as well (and match
-on error code as well).  If using detailed errors the Issue, Error, and Fatal
-output levels will take advantage of them and show the best stack trace and
-combined messages, incorporating any error codes used as well (if error codes
-are used then "Error: " prefixes become "Error #1004: " automatically, same for
-Issue and Fatal level output).  If not used, no problem.
+Optionally available is something called "detailed" errors.  If one wants stack
+traces closer to an original error occurrance these can be useful (similar to
+how Dropbox does errors, borrowed from than and others, thanks!).  Additionally,
+if one wants error codes one can optionally use them.  One can also continue
+to "check equality" core library or vendor pkg error messages even if one
+has wrapped the original error as it is returned through the call stack.
+Again, these detailed errors with optional error codes are totally optional
+but can be of use.
 
-The goal is flexible control of output streams and how they can be marked
+The key goal is flexible control of output streams and how they can be marked
 up, dynamically redirected, augmented with meta-data to help with support
 or troubleshooting, etc.  If something fancier is needed one can dynamically
-plug in your own output formatter with this package to override or augment
-the built-in output prefixes and flags.  For example, my tool has a text and
-JSON output mode.  I use this feature when in JSON mode to control error
-Issues, Errors or Fatals so they tie into the JSON infrastructure and return
-valid JSON containing errors or warnings (vs simple text messages).  These
-formatters can completely suppress the "native" 'out' package output for
-either the screen or log file or both output streams (eg: my JSON package
-does this for warnings, pushing them into the JSON structure I'll dump at
-the end so I "stash" them in the JSON output structure and tell the 'out'
-package not to print them or log them since the final JSON output dump will
-include them).
+plug in one's own output formatter with this package to override or augment
+the built-in output prefixes and flags.
 
-Summary:
+A more complete list of features:
 
 1. Ready for basic CLI screen output with levels out of the box, no setup
-2. Easy drop-in replacement for fmt.Print[f|ln](), plus level specific func's
+2. Drop-in replacement for log or fmt's Print[f|ln](), w/multiple level support
 3. Trivial to "turn on" logging (output mirroring) to a temp or named log file
 4. Independent io.Writer control over the two output streams (eg: screen/logfile)
-5. Independent output level thresholds for each target (eg: screen and logfile)
+5. Independent output level thresholds for each target (eg: screen/logfile)
 6. Independent control over flags (eg: augment log file with date/time, file/line#, etc)
 7. Clean alignment and handling for multi-line strings or strings w/no newlines
 8. Ability to limit debug/trace output to specific pkg(s) or function(s)
 9. Ability to easily add stack trace on issues/errors/fatal's (dying/non-zero or not)
-10. Goal is to be "safe" for concurrent use (if you see problems please open a git issue)
+10. Tries to be "safe" for concurrent use (if any problems, please open a git issue)
 11. Support for plugin formatters to roll your own format (or support other output mechanisms)
 12. "Deferred" function can be set to run before exit (eg: summary info, tmp logfile name, etc)
-13. Optional: "detailed" errors type adds stack from orig error instance, wrapping of errors
+13. Optional "detailed" errors type gives more accurate stack traces, optional error codes
 
 Thanks much to the Go community for ideas, open packages, etc to form some of these
 ideas (particularly the Go authors, spf13 and the Dropbox folks).
@@ -123,9 +114,12 @@ other usually targeted towards log file output (default is to discard log file
 output until it is configured, see below).  One can, of course, redirect either
 or both of these output streams anywhere via io.Writers (or multi-Writers).
 One can also send output to the two output streams via an io.Writer at the
-desired level.  There are a couple ways to get a writer but the easiest way
-is direct: out.TRACE, out.DEBUG, out.VERBOSE, out.INFO, out.NOTE, out.ISSUE,
-out.ERROR, out.FATAL, eg:
+desired level.  You can give the pkg any io.Writer for any output level for
+both the screen and log file output, so you have control.  Additionally, if
+you just want an io.Writer for an existing output level you can use the
+built-in writers as another way to send output via the 'out' package, see
+the out.TRACE, out.DEBUG, out.VERBOSE, out.INFO, out.NOTE, out.ISSUE,
+out.ERROR and out.FATAL io.Writers that are directly accessible, eg:
 
  * fmt.Fprintf(out.DEBUG, "%s", someDebugString)    (same as out.Debug(..))
  * fmt.Fprintf(out.INFO, "%s", someString)          (same as out.Print|out.Info)
@@ -137,10 +131,9 @@ One can also access the writers via API but not as easy as the above:
  * fmt.Fprintf(out.GetWriter(out.LevelDebug), "%s", someDebugString)
  * ...
 
-One can additionally override the screen and logfile io.Writers for any
-output level via SetWriter(), see below.  Keep in mind that you may need
-to adjust the output thresholds so you actually see output once a writer
-is set, see SetThreshold() below.
+See out.SetWriter() examples below on changing screen or log file
+writers as well as SetThreshold() to change output thresholds for
+each writer and such.
 
 An example of standard usage:
 
@@ -149,22 +142,22 @@ An example of standard usage:
         "github.com/dvln/out"
     )
 
-    // Lets set up a tmp logfile first
+    // Lets set up a tmp log file first
     logFileName := out.UseTempLogFile("mytool.")
-    // Print that to the screen as logfile currently discarding output
+    // Print that to the screen as log file currently discarding output
     out.Println("Temp log file:", logFileName)
 
-    // Set logfile output threshold: verbose, info/print, note, issue, err, fatal:
+    // Set log file output threshold: verbose, info/print, note, issue, err, fatal:
     out.SetThreshold(out.LevelVerbose, out.ForLogfile)
     // Note that stack traces for non-zero exit (IssueExit/ErrorExit/Fatal)
-    // are set up,by default, to go to the logfile (which we just config'd)
+    // are set up,by default, to go to the log file (which we just config'd)
 
     ...
     // Day to day normal output
     out.Printf("some info: %s\n", infostr)
 
     // Less important output not shown to screen (LevelInfo default) but it
-    // will go into the logfile (LevelVerbose as above)
+    // will go into the log file (LevelVerbose as above)
     out.Verbosef("data was pulled from src: %s\n", source)
 
     ...
@@ -179,7 +172,7 @@ An example of standard usage:
         //   Issue: Some expected compute resources offline due to unexpected issue:
         //   Issue:   <somerr>
         //   Issue: If this continues for a while let IT know, continuing...
-        // If we wanted a stack trace for all issues to the logfile we
+        // If we wanted a stack trace for all issues to the log file we
         // could have set this here or above and we would get a stack
         // in the log file and the tool would keep running:
         //   out.SetStackTraceConfig(out.ForLogfile|out.StackTraceAllIssues)
@@ -215,7 +208,7 @@ data is written to (via io.Writer's), plug in your own formatter if you don't
 like these built-in options (which can reformat, suppress/re-route output, etc)
 and even use built-in "detailed" errors if preferred (more below).  Note also
 that one can easily hook up CLI options like a debug or verbose option into
-API's to set output thresholds and turn on get logfile names and such.
+API's to set output thresholds and turn on get log file names and such.
 
 There are 8 output levels (perhaps too many for most folks) but one can, of
 course, just use those that a given product needs.  There is no need to use
@@ -248,9 +241,9 @@ a prefix for the Issue level that is easy to tweak.
 For the default log file output io.Writer this starts with an ioutil.Discard
 which effectively means send output to /dev/null even if the logging threshold
 says to log.  The default logging threshold is also set to discard data send to
-the logfile output stream.  However, once these two items are set up (as in
+the log file output stream.  However, once these two items are set up (as in
 examples above and below) then this is the default config for the various
-levels for a logfile:
+levels for a log file:
 
 ```text
    Trace level:         "[<pid>] TRACE   <date/time> <shortfile:line#:shortfunc> Trace: <msg>"
@@ -297,7 +290,7 @@ file we just created (uses Go's temp file routines):
     ...
     // perhaps the CLI options map to these
     if Debug && Verbose {
-        // lets set both screen and logfile to Trace level:
+        // lets set both screen and log file to Trace level:
         out.SetThreshold(out.LevelTrace, out.ForBoth)
     }
     ...
@@ -336,7 +329,7 @@ on any log file output stream settings/config (ie: if one is set up).
 
 ### Set log file output to a specific file to be at the Debug level
 
-In this case we'll use another API to set up the logfile io.Writer to
+In this case we'll use another API to set up the log file io.Writer to
 a specific file:
 
 ```go
@@ -476,7 +469,7 @@ the given buffer.
 
 In this case we want to keep the screen output unchanged and going to the screen
 and we want to instead turn on the log file output stream and make it match the
-screens output exactly (by default logfile output has more flags turned on by
+screens output exactly (by default log file output has more flags turned on by
 default to show pid, long date/timestamp, file name, line # and func name markup
 and other goodies).  So we'll turn that off and match the screen output stream
 flag settings and output threshold and write the result (matching the screen
@@ -506,7 +499,7 @@ output exactly) into a buffer:
     // Now match the screens output threshold (typically Print/Info level):
     out.SetThreshold(out.Threshold(out.ForScreen), out.ForLogfile)
     ...
-    // Point the logfile output stream (it's io.Writer) at a buffer now:
+    // Point the log file output stream (it's io.Writer) at a buffer now:
     logfileBuf := new(bytes.Buffer)
     out.SetWriter(logfileBuf, out.ForLogfile)
     ...
@@ -645,12 +638,12 @@ or out.Fatal() or the out.*Exit() functions.  Use is pretty easy:
 
 ```go
 // mySummary wraps up my programs output with summary data or perhaps
-// by closing or moving files or rotating logfiles or outputting names
+// by closing or moving files or rotating log files or outputting names
 // of tmp files generated within the tool to capture output.
 func mySummary(exitVal int) {
-    // For our example we'll just note a tmp logfile path/name but we'll
+    // For our example we'll just note a tmp log file path/name but we'll
     // make sure that msg only goes to the screen output on STDERR and is
-    // not written to the logfile output stream... only resets the output
+    // not written to the log file output stream... only resets the output
     // stream if we're writing to stdout, if we're writing to some other
     // output io.Writer for the note level output we'll just use that:
     if tmpLogfileMsg != "" {
@@ -661,7 +654,7 @@ func mySummary(exitVal int) {
 
         }
 
-        // Don't put the tmp logfile note in the logfile itself...
+        // Don't put the tmp log file note in the log file itself...
         currThresh := out.Threshold(out.ForLogfile)
         out.SetThreshold(out.LevelDiscard, out.ForLogfile)
 
@@ -814,7 +807,7 @@ dynamically.  These are mostly useful for running a tool that uses this
 package and more powerfully controlling debug output (limiting it to just
 areas of interest), overriding default stack tracing behavior to perhaps
 turn on stack traces for all issues as well as for dynamically adjusting
-screen or logfile output flags to add more meta-data for troubleshooting:
+screen or log file output flags to add more meta-data for troubleshooting:
 
  * PKG_OUT_DEBUG_SCOPE env can be set to to a list of packages or functions
    to restrict debug/trace output to, useful to trim debugging output and focus
@@ -865,17 +858,23 @@ screen or logfile output flags to add more meta-data for troubleshooting:
    to receive logging data at the right output thresholds and such.
 
 # Current status
-This is a very early release 0.2 level release.  It will be fluctuating but
-should stabilize around Aug 2015.  It is recommended you vendor it as the API's
-are not yet stable.  Definitely feel free to open issues under github as
-needed (github.com/dvln/out).  Thanks for trying it "out"... yeah, couldn't
-resist.  ;)
+This is now stabilizing.  Currently 'out' is at a "v0.8.0" level (semantic
+versioning v2).  Not fully stable until v1.0.0 so keep that in mind and
+fork it if you're using it (or vendor it).  Expect v1.0.0 around early
+2016 after I get some more use and input.  Feel free to fork, send pull
+requests or file issues.
 
-I've tried to use mutexes and atomic operations to protect the data so it can
-be used concurrently but take that with a grain of salt as it's not heavily
-tested in this area yet (passes race testing though).
+Note: I've tried to use mutexes and atomic operations to protect the data
+so it can be used concurrently but take that with a grain of salt as it's
+not heavily tested in this area yet (yes, it passes race testing).
 
-I wrote this for use in [dvln](http://github.com/dvln). Yeah, doesn't really
-exist yet but we shall see if I can change that.  It's targeted towards nested
+I wrote this for use in [dvln](http://github.com/dvln/dvln). Yeah, doesn't really
+exist yet but we shall see if I can change that (but one can see this package
+in use in that and packages it depends upon).  It's targeted towards nested
 multi-pkg multi-scm development line and workspace management (not necessarily
 for Go workspaces but could be used for that as well)... what could go wrong? ;)
+
+Thanks again to the Go authors and various others like spf13, Dropbox and countless
+others authors with open code that I have gleaned ideas and code from to generate this
+package.
+
