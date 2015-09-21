@@ -90,7 +90,7 @@ func TestDetailError(t *testing.T) {
 
 	assert.Contains(t, screenBuf.String(), "Issue #293: test error")
 	assert.Contains(t, screenBuf.String(), "Issue #293: Stack Trace:")
-	assert.Contains(t, screenBuf.String(), "Issue #293: dvln/lib/out.trySomething")
+	assert.Contains(t, screenBuf.String(), "/out.trySomething")
 
 	// Now reset the most common things for the 'out' pkg so the next test
 	// func will operate sanely as if we're coming in fresh
