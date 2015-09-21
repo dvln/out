@@ -16,7 +16,7 @@ to Go's log package, just more configuration/markup options).
 Basically ones call to 'fmt.Println()' or 'log.Printf()' would be replaced
 with an 'out.Println()' and 'out.Printf()'.  If one wanted to use different
 levels one could use 'out.Debugln()' or 'out.Notef()' or various other
-output levels just as easily with the 'out.<Level>[ln|f]()' format.  One
+output levels just as easily with the 'out.\<Level\>\[ln|f\]()' format.  One
 can do additional things as well, a few examples:
 
 1. Errors could be set up to be shown in human format or JSON (see formatters)
