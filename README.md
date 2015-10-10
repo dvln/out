@@ -1,9 +1,9 @@
 out
 ===
 
-A package for easily used "leveled" output designed to do a lot more than
-Go's log package.  This pkg has two io.Writer streams that are independently
-controlled.  These are typically for screen output (which works out of
+A package for powerful "leveled" output designed to do more than Go's standard
+log package.  This package has two io.Writer streams that are independently
+controllable.  These are typically for screen output (which works out of
 the box) and mirrored log file output which is trivial to set up for a tmp
 or named log file.  With independent control over the output streams one
 can print regular output to the screen while mirroring that to a log file
@@ -11,20 +11,21 @@ or one can easily set the log file output to be at a different output
 level (eg: 'trace' level for verbose debugging) with markup data added
 such as Go file name, func name and line #, date/timestamp, pid, log
 level, etc prefixed.  All flags/metadata are fully configurable (similar
-to Go's log package, just more configuration/markup options).
+to Go's log package, just with more configuration/markup options).
 
-Basically ones call to 'fmt.Println()' or 'log.Printf()' would be replaced
-with an 'out.Println()' and 'out.Printf()'.  If one wanted to use different
+Basically replace calls to 'fmt.Println()' or 'log.Printf()' instead with
+calls to 'out.Println()' and 'out.Printf()'.  If one wanted to use different
 levels one could use 'out.Debugln()' or 'out.Notef()' or various other
-output levels just as easily with the 'out.\<Level\>\[ln|f\]()' format.  One
-can do additional things as well, a few examples:
+output levels just as easily with the 'out.\<Level\>\[ln|f\]()' routines. 
+One can do additional things as well, a few examples:
 
 1. Errors could be set up to be shown in human format or JSON (see formatters)
 2. Trim/filter debugging output to specific packages or even package functions
 3. Optional "detailed" errors to get stack traces near orig error occurance
 4. Cleaner log file vs screen output formatting/alignment (vs Go 'log' pkg)
 5. Augment screen and/or logged data with more extensive meta-data markup options
-6. All of these are optional but add power if needed, more below ...
+6. Direct access to io.Writers for every output level (eg: out.TRACE, out.DEBUG) 
+7. All of these and more are optional but add power if needed, more below ...
 
 A CLI tool that uses 'out' can easly have screen output that looked something
 like the following while the log file output showed more detail:
@@ -62,18 +63,19 @@ stream.  Independent control can be powerful.
 
 Optionally available is something called "detailed" errors.  If one wants stack
 traces closer to an original error occurrance these can be useful (similar to
-how Dropbox does errors, borrowed from than and others, thanks!).  Additionally,
+how Dropbox does errors, borrowed from their ideas/code, thanks!).  Additionally,
 if one wants error codes one can optionally use them.  One can also continue
-to "check equality" core library or vendor pkg error messages even if one
-has wrapped the original error as it is returned through the call stack.
-Again, these detailed errors with optional error codes are totally optional
-but can be of use.
+to "check equality" with core library or vendor pkg error message "contants" even 
+if one has wrapped the original error as it is returned through the call stack.
+Keep in mind that use of detailed errors with optional error codes is not required
+in any way since one can leverage the "out" package simply for levelled output alone
+without using these.
 
-The key goal is flexible control of output streams and how they can be marked
-up, dynamically redirected, augmented with meta-data to help with support
+The key "out" package goal is flexible control of output streams.  Flexible
+mark-up, dynamically redirection, meta-data augmentation to help with support
 or troubleshooting, etc.  If something fancier is needed one can dynamically
 plug in one's own output formatter with this package to override or augment
-the built-in output prefixes and flags.
+the built-in output prefixes and flag based meta-data.
 
 A more complete list of features:
 
