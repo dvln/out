@@ -120,6 +120,8 @@ import (
 	"time"
 )
 
+// mutex is used for writing to global vars and Writing to what might
+// be stdout and stderr (or may not be)... try to be goroutine friendly
 var mutex sync.Mutex
 
 // Some of these flags are borrowed from Go's log package and "mostly" behave
@@ -1215,7 +1217,11 @@ func (o *LvlOutput) output(terminal bool, exitVal int, v ...interface{}) {
 	// dump msg based on screen and log output levels
 	_, err := o.stringOutput(msg, terminal, exitVal, detErr)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s", err)
+		mutex.Lock()
+		{
+			fmt.Fprintf(os.Stderr, "%s", err)
+		}
+		mutex.Unlock()
 		if deferFunc != nil {
 			deferFunc(int(errorExitVal))
 		}
@@ -1225,8 +1231,8 @@ func (o *LvlOutput) output(terminal bool, exitVal int, v ...interface{}) {
 	}
 }
 
-// outputln is similar to fmt.Println(), it'll space separate args with no newline
-// and output them to the screen and/or log file loggers based on levels
+// outputln is similar to fmt.Println(), it'll space separate args with no
+// newline and output them to the screen and/or log file loggers based on levels
 func (o *LvlOutput) outputln(terminal bool, exitVal int, v ...interface{}) {
 	// set up the message to dump
 	msg := fmt.Sprintln(v...)
@@ -1240,7 +1246,11 @@ func (o *LvlOutput) outputln(terminal bool, exitVal int, v ...interface{}) {
 	// dump msg based on screen and log output levels
 	_, err := o.stringOutput(msg, terminal, exitVal, detErr)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s", err)
+		mutex.Lock()
+		{
+			fmt.Fprintf(os.Stderr, "%s", err)
+		}
+		mutex.Unlock()
 		if deferFunc != nil {
 			deferFunc(int(errorExitVal))
 		}
@@ -1265,7 +1275,11 @@ func (o *LvlOutput) outputf(terminal bool, exitVal int, format string, v ...inte
 	// dump msg based on screen and log output levels
 	_, err := o.stringOutput(msg, terminal, exitVal, detErr)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s", err)
+		mutex.Lock()
+		{
+			fmt.Fprintf(os.Stderr, "%s", err)
+		}
+		mutex.Unlock()
 		if deferFunc != nil {
 			deferFunc(int(errorExitVal))
 		}
@@ -1354,16 +1368,20 @@ func (o *LvlOutput) exit(exitVal int) {
 	if stacktrace != "" && o.stackTraceWanted(terminal, exitVal, ForScreen) && o.level >= screenThreshold && o.level != LevelDiscard {
 		msg, suppressOutput := o.doPrefixing(stacktrace, ForScreen, SmartInsert, nil, false)
 		if !suppressOutput {
-			_, err := o.screenHndl.Write([]byte(msg))
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "%sError writing stacktrace to screen output handle:\n%+v\n", o.prefix, err)
-				if deferFunc != nil {
-					deferFunc(int(errorExitVal))
-				}
-				if os.Getenv("PKG_OUT_NO_EXIT") != "1" {
-					os.Exit(int(errorExitVal))
+			mutex.Lock()
+			{
+				_, err := o.screenHndl.Write([]byte(msg))
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "%sError writing stacktrace to screen output handle:\n%+v\n", o.prefix, err)
+					if deferFunc != nil {
+						deferFunc(int(errorExitVal))
+					}
+					if os.Getenv("PKG_OUT_NO_EXIT") != "1" {
+						os.Exit(int(errorExitVal))
+					}
 				}
 			}
+			mutex.Unlock()
 		}
 	}
 	if stacktrace != "" && o.stackTraceWanted(terminal, exitVal, ForLogfile) && o.level >= logThreshold && o.level != LevelDiscard {
@@ -1739,28 +1757,28 @@ func (o *LvlOutput) writeOutput(s string, outputTgt int, dying bool, exitVal int
 		tgtStreamNewline = &screenNewline
 	}
 	writeLength := 0
+
+	// Safely do writes and adjust settings as needed
+	mutex.Lock()
 	n, err := hndl.Write([]byte(s))
 	writeLength += n
 	if err != nil {
 		writeErr := fmt.Errorf("%sError writing to %s output handler:\n%+v\noutput:\n%s\n", o.prefix, tgtString, err, s)
+		mutex.Unlock()
 		return writeLength, writeErr
 	}
-	// Safely adjust these settings
-	mutex.Lock()
-	{
-		if s[len(s)-1] == 0x0A { // if last char is a newline..
-			*tgtStreamNewline = true
-		} else {
-			*tgtStreamNewline = false
-		}
+	if s[len(s)-1] == 0x0A { // if last char is a newline..
+		*tgtStreamNewline = true
+	} else {
+		*tgtStreamNewline = false
 	}
-	mutex.Unlock()
 	if dying && !*tgtStreamNewline {
 		// ignore errors, just quick "prettyup" attempt:
 		n, err = hndl.Write([]byte("\n"))
 		writeLength += n
 		if err != nil {
 			writeErr := fmt.Errorf("%sError writing newline to %s output handler:\n%+v\n", o.prefix, tgtString, err)
+			mutex.Unlock()
 			return writeLength, writeErr
 		}
 		// normally we're dying so this doesn't matter but in testing we can
@@ -1773,9 +1791,11 @@ func (o *LvlOutput) writeOutput(s string, outputTgt int, dying bool, exitVal int
 		writeLength += n
 		if err != nil {
 			writeErr := fmt.Errorf("%sError writing stacktrace to %s output handle:\n%+v\n", o.prefix, tgtString, err)
+			mutex.Unlock()
 			return writeLength, writeErr
 		}
 	}
+	mutex.Unlock()
 	return writeLength, nil
 }
 
