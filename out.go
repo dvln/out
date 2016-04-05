@@ -122,7 +122,7 @@ import (
 
 // mutex is used for writing to global vars and Writing to what might
 // be stdout and stderr (or may not be)... try to be goroutine friendly
-var mutex sync.Mutex
+var mutex sync.RWMutex
 
 // Some of these flags are borrowed from Go's log package and "mostly" behave
 // the same but handle multi-line strings and non-newline terminated strings
@@ -394,17 +394,18 @@ func Threshold(outputTgt int) Level {
 // level, outputTgt can be set to out.ForScreen, out.ForLogfile or both |'d
 // together, level is out.LevelInfo for example (any valid level)
 func SetThreshold(level Level, outputTgt int) {
-	// Safely adjust these settings
-	mutex.Lock()
-	{
-		if outputTgt&ForScreen != 0 {
-			screenThreshold = levelCheck(level)
-		}
-		if outputTgt&ForLogfile != 0 {
-			logThreshold = levelCheck(level)
-		}
+	if outputTgt&ForScreen != 0 {
+		lc := levelCheck(level)
+		mutex.Lock()
+		screenThreshold = lc
+		mutex.Unlock()
 	}
-	mutex.Unlock()
+	if outputTgt&ForLogfile != 0 {
+		lc := levelCheck(level)
+		mutex.Lock()
+		logThreshold = lc
+		mutex.Unlock()
+	}
 }
 
 // ShortFileNameLength returns the current "assumed" padding around short
@@ -543,6 +544,8 @@ func Prefix(level Level) string {
 	}
 	var prefix string
 	for _, o := range outputters {
+		o.mu.Lock()
+		defer o.mu.Unlock()
 		if o.level == level {
 			prefix = o.prefix
 			break
@@ -561,9 +564,9 @@ func SetPrefix(level Level, prefix string) {
 	}
 	// loop through the levels and reset the prefix of the specified level
 	for _, o := range outputters {
+		o.mu.Lock()
+		defer o.mu.Unlock()
 		if o.level == level {
-			o.mu.Lock()
-			defer o.mu.Unlock()
 			o.prefix = prefix
 		}
 	}
@@ -590,12 +593,15 @@ func Flags(level Level, outputTgt int) int {
 	var flags int
 	for _, o := range outputters {
 		o.mu.Lock()
-		defer o.mu.Unlock()
-		if o.level == level {
+		sF := o.screenFlags
+		lF := o.logFlags
+		outLvl := o.level
+		o.mu.Unlock()
+		if outLvl == level {
 			if outputTgt&ForScreen != 0 {
-				flags = o.screenFlags
+				flags = sF
 			} else if outputTgt&ForLogfile != 0 {
-				flags = o.logFlags
+				flags = lF
 			} else {
 				Fatalln("Invalid identification of screen or logfile target for Flags()")
 			}
@@ -634,6 +640,8 @@ func Writer(level Level, outputTgt int) io.Writer {
 	level = levelCheck(level)
 	writer := ioutil.Discard
 	for _, o := range outputters {
+		o.mu.Lock()
+		defer o.mu.Unlock()
 		if o.level == level {
 			if outputTgt&ForScreen != 0 {
 				writer = o.screenHndl
@@ -643,16 +651,16 @@ func Writer(level Level, outputTgt int) io.Writer {
 			}
 		}
 	}
-	return (writer)
+	return writer
 }
 
 // SetWriter sets the screen and/or logfile output io.Writer for every log
 // level to the given writer
 func SetWriter(level Level, w io.Writer, outputTgt int) {
 	for _, o := range outputters {
+		o.mu.Lock()
+		defer o.mu.Unlock()
 		if level == LevelAll || o.level == level {
-			o.mu.Lock()
-			defer o.mu.Unlock()
 			if outputTgt&ForScreen != 0 {
 				o.screenHndl = w
 			}
@@ -707,7 +715,7 @@ func SetLogFile(path string) {
 	if err != nil {
 		Fatalln("Failed to open log file:", path, "Err:", err)
 	}
-	// Safely adjust these settings
+	// Safely adjust this global settings
 	mutex.Lock()
 	{
 		logFileName = file.Name()
@@ -752,8 +760,10 @@ func UseTempLogFile(prefix string) string {
 // added and is by default prefixed with "Trace: <date/time> <msg>" for each
 // line but you can use flags and remove the timestamp, can also drop the prefix
 func Trace(v ...interface{}) {
+	mutex.Lock()
 	terminate := false
 	exitVal := 0
+	mutex.Unlock()
 	TRACE.output(terminate, exitVal, v...)
 }
 
@@ -761,32 +771,40 @@ func Trace(v ...interface{}) {
 // and is, by default, prefixed with "Debug: <date/time> <your msg>" for each
 // line but you can use flags and remove the timestamp, can also drop the prefix
 func Debug(v ...interface{}) {
+	mutex.Lock()
 	terminate := false
 	exitVal := 0
+	mutex.Unlock()
 	DEBUG.output(terminate, exitVal, v...)
 }
 
 // Verbose meant for verbose user seen screen output, space separated
 // opts printed with no newline added, no output prefix is added by default
 func Verbose(v ...interface{}) {
+	mutex.Lock()
 	terminate := false
 	exitVal := 0
+	mutex.Unlock()
 	VERBOSE.output(terminate, exitVal, v...)
 }
 
 // Print is meant for "normal" user output, space separated opted
 // printed with no newline added, no output prefix is added by default
 func Print(v ...interface{}) {
+	mutex.Lock()
 	terminate := false
 	exitVal := 0
+	mutex.Unlock()
 	INFO.output(terminate, exitVal, v...)
 }
 
 // Info is the same as Print: meant for "normal" user output, space separated
 // opts printed with no newline added and no output prefix added by default
 func Info(v ...interface{}) {
+	mutex.Lock()
 	terminate := false
 	exitVal := 0
+	mutex.Unlock()
 	INFO.output(terminate, exitVal, v...)
 }
 
@@ -794,8 +812,10 @@ func Info(v ...interface{}) {
 // space separated and printed with no newline added, "Note: <msg>" prefix is
 // also added by default
 func Note(v ...interface{}) {
+	mutex.Lock()
 	terminate := false
 	exitVal := 0
+	mutex.Unlock()
 	NOTE.output(terminate, exitVal, v...)
 }
 
@@ -803,8 +823,10 @@ func Note(v ...interface{}) {
 // printed with no newline added, "Issue: <msg>" prefix added by default,
 // if you want to exit after the issue is reported see IssueExit()
 func Issue(v ...interface{}) {
+	mutex.Lock()
 	terminate := false
 	exitVal := 0
+	mutex.Unlock()
 	ISSUE.output(terminate, exitVal, v...)
 }
 
@@ -813,7 +835,9 @@ func Issue(v ...interface{}) {
 // the "exit" form of this output routine results in os.Exit() being
 // called with the given exitVal (see Issue() if you do not want to exit)
 func IssueExit(exitVal int, v ...interface{}) {
+	mutex.Lock()
 	terminate := true
+	mutex.Unlock()
 	ISSUE.output(terminate, exitVal, v...)
 }
 
@@ -823,8 +847,10 @@ func IssueExit(exitVal int, v ...interface{}) {
 // Note: by "unexpected" these are things like filesystem permissions
 // problems, see Issue for more normal user level usage issues
 func Error(v ...interface{}) {
+	mutex.Lock()
 	terminate := false
 	exitVal := 0
+	mutex.Unlock()
 	ERROR.output(terminate, exitVal, v...)
 }
 
@@ -835,7 +861,9 @@ func Error(v ...interface{}) {
 // Note: by "unexpected" these are things like filesystem permissions
 // problems, see Issue for more normal user level usage issues
 func ErrorExit(exitVal int, v ...interface{}) {
+	mutex.Lock()
 	terminate := true
+	mutex.Unlock()
 	ERROR.output(terminate, exitVal, v...)
 }
 
@@ -843,8 +871,10 @@ func ErrorExit(exitVal int, v ...interface{}) {
 // opts printed with no newline added, "Fatal: <msg>" prefix added by default
 // and the tool will exit non-zero here
 func Fatal(v ...interface{}) {
+	mutex.Lock()
 	terminate := true
 	exitVal := int(errorExitVal)
+	mutex.Unlock()
 	FATAL.output(terminate, exitVal, v...)
 }
 
@@ -855,8 +885,10 @@ func Fatal(v ...interface{}) {
 // added and is, by default, prefixed with "Trace: <your output>" for each line
 // but you can use flags and remove the timestamp, can also drop the prefix
 func Traceln(v ...interface{}) {
+	mutex.Lock()
 	terminate := false
 	exitVal := 0
+	mutex.Unlock()
 	TRACE.outputln(terminate, exitVal, v...)
 }
 
@@ -864,16 +896,20 @@ func Traceln(v ...interface{}) {
 // and is, by default, prefixed with "Debug: <date/time> <yourmsg>" for each
 // line but you can use flags and remove the timestamp, can also drop the prefix
 func Debugln(v ...interface{}) {
+	mutex.Lock()
 	terminate := false
 	exitVal := 0
+	mutex.Unlock()
 	DEBUG.outputln(terminate, exitVal, v...)
 }
 
 // Verboseln is meant for verbose user seen screen output, space separated
 // opts printed with newline added, no output prefix is added by default
 func Verboseln(v ...interface{}) {
+	mutex.Lock()
 	terminate := false
 	exitVal := 0
+	mutex.Unlock()
 	VERBOSE.outputln(terminate, exitVal, v...)
 }
 
@@ -881,8 +917,10 @@ func Verboseln(v ...interface{}) {
 // separated opts printed with newline added and no output prefix added by
 // default
 func Println(v ...interface{}) {
+	mutex.Lock()
 	terminate := false
 	exitVal := 0
+	mutex.Unlock()
 	INFO.outputln(terminate, exitVal, v...)
 }
 
@@ -890,8 +928,10 @@ func Println(v ...interface{}) {
 // separated opts printed with newline added and no output prefix added by
 // default
 func Infoln(v ...interface{}) {
+	mutex.Lock()
 	terminate := false
 	exitVal := 0
+	mutex.Unlock()
 	INFO.outputln(terminate, exitVal, v...)
 }
 
@@ -899,8 +939,10 @@ func Infoln(v ...interface{}) {
 // opts are space separated and printed with a newline added, "Note: <msg>"
 // prefix is also added by default
 func Noteln(v ...interface{}) {
+	mutex.Lock()
 	terminate := false
 	exitVal := 0
+	mutex.Unlock()
 	NOTE.outputln(terminate, exitVal, v...)
 }
 
@@ -910,8 +952,10 @@ func Noteln(v ...interface{}) {
 // for unexpected errors use Errorln (eg: file system full, etc).  If you wish
 // to exit after your issue is printed please use IssueExitln() instead.
 func Issueln(v ...interface{}) {
+	mutex.Lock()
 	terminate := false
 	exitVal := 0
+	mutex.Unlock()
 	ISSUE.outputln(terminate, exitVal, v...)
 }
 
@@ -922,7 +966,9 @@ func Issueln(v ...interface{}) {
 // routine honors PKG_OUT_STACK_TRACE_CONFIG env as well as the package
 // stacktrace setting via SetStackTraceConfig(), see that routine for docs.
 func IssueExitln(exitVal int, v ...interface{}) {
+	mutex.Lock()
 	terminate := true
+	mutex.Unlock()
 	ISSUE.outputln(terminate, exitVal, v...)
 }
 
@@ -931,8 +977,10 @@ func IssueExitln(exitVal int, v ...interface{}) {
 // Note: by "unexpected" these are things like filesystem permissions problems,
 // see Noteln/Issueln for more normal user level notes/usage
 func Errorln(v ...interface{}) {
+	mutex.Lock()
 	terminate := false
 	exitVal := 0
+	mutex.Unlock()
 	ERROR.outputln(terminate, exitVal, v...)
 }
 
@@ -945,7 +993,9 @@ func Errorln(v ...interface{}) {
 // Note: by "unexpected" these are things like filesystem permissions
 // problems, see IssueExitln() for more normal user level usage issues
 func ErrorExitln(exitVal int, v ...interface{}) {
+	mutex.Lock()
 	terminate := true
+	mutex.Unlock()
 	ERROR.outputln(terminate, exitVal, v...)
 }
 
@@ -955,8 +1005,10 @@ func ErrorExitln(exitVal int, v ...interface{}) {
 // via the env PKG_OUT_STACK_TRACE_CONFIG or the API SetStackTraceConfig(),
 // see the routine for docs.
 func Fatalln(v ...interface{}) {
+	mutex.Lock()
 	terminate := true
 	exitVal := int(errorExitVal)
+	mutex.Unlock()
 	FATAL.outputln(terminate, exitVal, v...)
 }
 
@@ -967,8 +1019,10 @@ func Fatalln(v ...interface{}) {
 // output is, by default, prefixed with "Trace: <date/time> <your msg>" for each
 // line but you can use flags and remove the timestamp, can also drop the prefix
 func Tracef(format string, v ...interface{}) {
+	mutex.Lock()
 	terminate := false
 	exitVal := 0
+	mutex.Unlock()
 	TRACE.outputf(terminate, exitVal, format, v...)
 }
 
@@ -976,40 +1030,50 @@ func Tracef(format string, v ...interface{}) {
 // output is by default prefixed with "Debug: <date/time> <your msg>" for each
 // line but you can use flags and remove the timestamp, can also drop the prefix
 func Debugf(format string, v ...interface{}) {
+	mutex.Lock()
 	terminate := false
 	exitVal := 0
+	mutex.Unlock()
 	DEBUG.outputf(terminate, exitVal, format, v...)
 }
 
 // Verbosef is meant for verbose user seen screen output, format string
 // followed by args (and no output prefix is added by default)
 func Verbosef(format string, v ...interface{}) {
+	mutex.Lock()
 	terminate := false
 	exitVal := 0
+	mutex.Unlock()
 	VERBOSE.outputf(terminate, exitVal, format, v...)
 }
 
 // Printf is the same as Infoln: meant for "normal" user output, format string
 // followed by args (and no output prefix added by default)
 func Printf(format string, v ...interface{}) {
+	mutex.Lock()
 	terminate := false
 	exitVal := 0
+	mutex.Unlock()
 	INFO.outputf(terminate, exitVal, format, v...)
 }
 
 // Infof is the same as Printf: meant for "normal" user output, format string
 // followed by args (and no output prefix added by default)
 func Infof(format string, v ...interface{}) {
+	mutex.Lock()
 	terminate := false
 	exitVal := 0
+	mutex.Unlock()
 	INFO.outputf(terminate, exitVal, format, v...)
 }
 
 // Notef is meant for output of key "note" the user should pay attention to,
 // format string followed by args, "Note: <yourmsg>" prefixed by default
 func Notef(format string, v ...interface{}) {
+	mutex.Lock()
 	terminate := false
 	exitVal := 0
+	mutex.Unlock()
 	NOTE.outputf(terminate, exitVal, format, v...)
 }
 
@@ -1017,8 +1081,10 @@ func Notef(format string, v ...interface{}) {
 // by args, prefix "Issue: <msg>" added by default.  If you want to exit
 // after your issue see IssueExitf() instead.
 func Issuef(format string, v ...interface{}) {
+	mutex.Lock()
 	terminate := false
 	exitVal := 0
+	mutex.Unlock()
 	ISSUE.outputf(terminate, exitVal, format, v...)
 }
 
@@ -1027,7 +1093,9 @@ func Issuef(format string, v ...interface{}) {
 // output routine results in os.Exit() being called with the given exitVal.
 // If you do not want to exit then see Issuef() instead
 func IssueExitf(exitVal int, format string, v ...interface{}) {
+	mutex.Lock()
 	terminate := true
+	mutex.Unlock()
 	ISSUE.outputf(terminate, exitVal, format, v...)
 }
 
@@ -1036,8 +1104,10 @@ func IssueExitf(exitVal int, format string, v ...interface{}) {
 // Note: by "unexpected" these are things like filesystem permissions problems,
 // see Notef/Issuef for more normal user level notes/usage
 func Errorf(format string, v ...interface{}) {
+	mutex.Lock()
 	terminate := false
 	exitVal := 0
+	mutex.Unlock()
 	ERROR.outputf(terminate, exitVal, format, v...)
 }
 
@@ -1045,7 +1115,9 @@ func Errorf(format string, v ...interface{}) {
 // followed by args, prefix "Error: <msg>" added by default, the "exit" form
 // of this output routine results in os.Exit() being called with given exitVal
 func ErrorExitf(exitVal int, format string, v ...interface{}) {
+	mutex.Lock()
 	terminate := true
+	mutex.Unlock()
 	ERROR.outputf(terminate, exitVal, format, v...)
 }
 
@@ -1053,8 +1125,10 @@ func ErrorExitf(exitVal int, format string, v ...interface{}) {
 // followed by args, prefix "Fatal: <msg>" added by default and will exit
 // non-zero from the tool (see Go 'log' Fatalf() method)
 func Fatalf(format string, v ...interface{}) {
+	mutex.Lock()
 	terminate := true
 	exitVal := int(errorExitVal)
+	mutex.Unlock()
 	FATAL.outputf(terminate, exitVal, format, v...)
 }
 
@@ -1208,7 +1282,6 @@ func (o *LvlOutput) output(terminal bool, exitVal int, v ...interface{}) {
 		// if we have a detailed error coming in at some output level insure
 		// that the output level used for that output matches the incoming
 		// output level always
-		//TESTING: make sure we're good
 		detErr.SetLvlOut(o)
 	}
 	// set up the message to dump
@@ -1328,6 +1401,9 @@ func (o *LvlOutput) stackTraceWanted(terminal bool, exitVal int, outputTgt int) 
 	if stackCfg&outputTgt == 0 {
 		return false
 	}
+	o.mu.Lock()
+	level := o.level
+	o.mu.Unlock()
 	// Now see if the detailed config really implies a stack trace is wanted...
 	if stackCfg&StackTraceNonZeroErrorExit != 0 {
 		// config indicates only terminal non-zero exit should have stack trace
@@ -1337,13 +1413,13 @@ func (o *LvlOutput) stackTraceWanted(terminal bool, exitVal int, outputTgt int) 
 		}
 	} else if stackCfg&StackTraceErrorExit != 0 {
 		// config indicates any warning/error level issue needs a stack trace
-		if !terminal || o.level < LevelIssue {
+		if !terminal || level < LevelIssue {
 			// error isn't a warning/error level and/or it's not fatal, no trace
 			return false
 		}
 	} else if stackCfg&StackTraceAllIssues != 0 {
 		// config indicates just any warning (issue) or err needs a stack trace
-		if o.level < LevelIssue {
+		if level < LevelIssue {
 			// no trace if level is Note, Print/Info, Verbose, Debug, Trace
 			return false
 		}
@@ -1363,28 +1439,33 @@ func (o *LvlOutput) stackTraceWanted(terminal bool, exitVal int, outputTgt int) 
 func (o *LvlOutput) exit(exitVal int) {
 	// get the stacktrace if it's configured, note that the depth is
 	// a little shallower if coming straight through Exit() to here:
+	mutex.Lock()
 	stacktrace := getStackTrace(nil, int(CallDepth())-1)
 	terminal := true
-	if stacktrace != "" && o.stackTraceWanted(terminal, exitVal, ForScreen) && o.level >= screenThreshold && o.level != LevelDiscard {
+	mutex.Unlock()
+	o.mu.Lock()
+	level := o.level
+	o.mu.Unlock()
+	if stacktrace != "" && o.stackTraceWanted(terminal, exitVal, ForScreen) && level >= screenThreshold && level != LevelDiscard {
 		msg, suppressOutput := o.doPrefixing(stacktrace, ForScreen, SmartInsert, nil, false)
 		if !suppressOutput {
 			mutex.Lock()
-			{
-				_, err := o.screenHndl.Write([]byte(msg))
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "%sError writing stacktrace to screen output handle:\n%+v\n", o.prefix, err)
-					if deferFunc != nil {
-						deferFunc(int(errorExitVal))
-					}
-					if os.Getenv("PKG_OUT_NO_EXIT") != "1" {
-						os.Exit(int(errorExitVal))
-					}
+			_, err := o.screenHndl.Write([]byte(msg))
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%sError writing stacktrace to screen output handle:\n%+v\n", o.prefix, err)
+				mutex.Unlock()
+				if deferFunc != nil {
+					deferFunc(int(errorExitVal))
 				}
+				if os.Getenv("PKG_OUT_NO_EXIT") != "1" {
+					os.Exit(int(errorExitVal))
+				}
+				mutex.Lock()
 			}
 			mutex.Unlock()
 		}
 	}
-	if stacktrace != "" && o.stackTraceWanted(terminal, exitVal, ForLogfile) && o.level >= logThreshold && o.level != LevelDiscard {
+	if stacktrace != "" && o.stackTraceWanted(terminal, exitVal, ForLogfile) && level >= logThreshold && level != LevelDiscard {
 		msg, suppressOutput := o.doPrefixing(stacktrace, ForLogfile, SmartInsert, nil, false)
 		if !suppressOutput {
 			o.logfileHndl.Write([]byte(msg))
@@ -1402,6 +1483,7 @@ func (o *LvlOutput) exit(exitVal int) {
 // avoid zero-padding.  Knows the buffer has capacity.  Taken from Go's 'log'
 // pkg since we want some of the same formatting.
 func itoa(buf *[]byte, i int, wid int) {
+	mutex.Lock()
 	u := uint(i)
 	if u == 0 && wid <= 1 {
 		*buf = append(*buf, '0')
@@ -1416,6 +1498,7 @@ func itoa(buf *[]byte, i int, wid int) {
 		b[bp] = byte(u%10) + '0'
 	}
 	*buf = append(*buf, b[bp:]...)
+	mutex.Unlock()
 }
 
 // getFlagString takes the time the output func was called and tries
@@ -1564,30 +1647,31 @@ func (o *LvlOutput) insertFlagMetadata(s string, outputTgt int, ctrl int) (strin
 	var suppressOutput bool
 	var level Level
 	o.mu.Lock()
-	defer o.mu.Unlock()
+	lvlOutLevel := o.level
+	sF := o.screenFlags
+	lF := o.logFlags
+	o.mu.Unlock()
 	// if printing to the screen target use those flags, else use logfile flags
 	if outputTgt&ForScreen != 0 {
 		if str := os.Getenv("PKG_OUT_SCREEN_FLAGS"); str != "" {
 			flags = determineFlags(str)
 		} else {
-			flags = o.screenFlags
+			flags = sF
 		}
-		level = o.level
+		level = lvlOutLevel
 	} else if outputTgt&ForLogfile != 0 {
 		if str := os.Getenv("PKG_OUT_LOGFILE_FLAGS"); str != "" {
 			flags = determineFlags(str)
 		} else {
-			flags = o.logFlags
+			flags = lF
 		}
-		level = o.level
+		level = lvlOutLevel
 	} else {
 		Fatalln("Invalid target passed to insertFlagMetadata():", outputTgt)
 	}
 	suppressOutput = false
 	if flags&(Lshortfile|Llongfile|Lshortfunc|Llongfunc) != 0 ||
 		os.Getenv("PKG_OUT_DEBUG_SCOPE") != "" {
-		// Caller() can take a little while so unlock the mutex
-		o.mu.Unlock()
 		var ok bool
 		var pc uintptr
 		pc, file, line, ok = runtime.Caller(int(callDepth))
@@ -1603,13 +1687,12 @@ func (o *LvlOutput) insertFlagMetadata(s string, outputTgt int, ctrl int) (strin
 				funcName = f.Name()
 			}
 		}
-		o.mu.Lock()
 		// if the user has restricted debugging output to specific packages
 		// or methods (funcname might be "github.com/dvln/out.MethodName")
 		// then we'll supress all debug output outside of the desired scope and
 		// only show those packages or methods of interest... simple substring
 		// match is done currently
-		if debugScope := os.Getenv("PKG_OUT_DEBUG_SCOPE"); funcName != "???" && debugScope != "" && (o.level == LevelDebug || o.level == LevelTrace) {
+		if debugScope := os.Getenv("PKG_OUT_DEBUG_SCOPE"); funcName != "???" && debugScope != "" && (lvlOutLevel == LevelDebug || lvlOutLevel == LevelTrace) {
 			scopeParts := strings.Split(debugScope, ",")
 			suppressOutput = true
 			for _, scopePart := range scopeParts {
@@ -1620,8 +1703,10 @@ func (o *LvlOutput) insertFlagMetadata(s string, outputTgt int, ctrl int) (strin
 			}
 		}
 	}
+	o.mu.Lock()
 	o.buf = o.buf[:0]
 	leader := getFlagString(&o.buf, flags, level, funcName, file, line, now)
+	o.mu.Unlock()
 	if leader == "" {
 		return s, suppressOutput
 	}
@@ -1705,10 +1790,14 @@ func (o *LvlOutput) doPrefixing(s string, outputTgt int, ctrl int, detErr Detail
 	// in function header around username
 	origString := s
 	var onNewline bool
+	mutex.Lock()
+	scrNewline := screenNewline
+	logNewline := logfileNewline
+	mutex.Unlock()
 	if outputTgt&ForScreen != 0 {
-		onNewline = screenNewline
+		onNewline = scrNewline
 	} else if outputTgt&ForLogfile != 0 {
-		onNewline = logfileNewline
+		onNewline = logNewline
 	} else {
 		Fatalln("Invalid target for output given in doPrefixing():", outputTgt)
 	}
@@ -1719,7 +1808,10 @@ func (o *LvlOutput) doPrefixing(s string, outputTgt int, ctrl int, detErr Detail
 	if detErr != nil {
 		errCode = Code(detErr)
 	}
-	s = InsertPrefix(s, o.prefix, ctrl, errCode)
+	o.mu.Lock()
+	prefix := o.prefix
+	o.mu.Unlock()
+	s = InsertPrefix(s, prefix, ctrl, errCode)
 
 	if os.Getenv("PKG_OUT_SMART_FLAGS_PREFIX") == "off" {
 		ctrl = AlwaysInsert // forcibly add prefix without smarts
@@ -1749,24 +1841,34 @@ func (o *LvlOutput) doPrefixing(s string, outputTgt int, ctrl int, detErr Detail
 // - error: if any unexpected write error occurred this will be a raw Go error
 func (o *LvlOutput) writeOutput(s string, outputTgt int, dying bool, exitVal int, stacktrace string) (int, error) {
 	tgtString := "logfile"
+	o.mu.Lock()
+	prefix := o.prefix
 	hndl := o.logfileHndl
+	mutex.Lock()
 	tgtStreamNewline := &logfileNewline
+	mutex.Unlock()
 	if outputTgt&ForScreen == 1 {
 		tgtString = "screen"
 		hndl = o.screenHndl
+		mutex.Lock()
 		tgtStreamNewline = &screenNewline
+		mutex.Unlock()
 	}
+	o.mu.Unlock()
 	writeLength := 0
 
 	// Safely do writes and adjust settings as needed
 	mutex.Lock()
 	n, err := hndl.Write([]byte(s))
+	mutex.Unlock()
 	writeLength += n
 	if err != nil {
-		writeErr := fmt.Errorf("%sError writing to %s output handler:\n%+v\noutput:\n%s\n", o.prefix, tgtString, err, s)
+		mutex.Lock()
+		writeErr := fmt.Errorf("%sError writing to %s output handler:\n%+v\noutput:\n%s\n", prefix, tgtString, err, s)
 		mutex.Unlock()
 		return writeLength, writeErr
 	}
+	mutex.Lock()
 	if s[len(s)-1] == 0x0A { // if last char is a newline..
 		*tgtStreamNewline = true
 	} else {
@@ -1777,7 +1879,7 @@ func (o *LvlOutput) writeOutput(s string, outputTgt int, dying bool, exitVal int
 		n, err = hndl.Write([]byte("\n"))
 		writeLength += n
 		if err != nil {
-			writeErr := fmt.Errorf("%sError writing newline to %s output handler:\n%+v\n", o.prefix, tgtString, err)
+			writeErr := fmt.Errorf("%sError writing newline to %s output handler:\n%+v\n", prefix, tgtString, err)
 			mutex.Unlock()
 			return writeLength, writeErr
 		}
@@ -1785,17 +1887,20 @@ func (o *LvlOutput) writeOutput(s string, outputTgt int, dying bool, exitVal int
 		// suppress the dying/exit so lets put 'out' into the right state
 		*tgtStreamNewline = true
 	}
+	mutex.Unlock()
 	// See if stack trace is needed...
 	if o.stackTraceWanted(dying, exitVal, outputTgt) {
+		mutex.Lock()
 		n, err = hndl.Write([]byte(stacktrace))
+		mutex.Unlock()
 		writeLength += n
 		if err != nil {
-			writeErr := fmt.Errorf("%sError writing stacktrace to %s output handle:\n%+v\n", o.prefix, tgtString, err)
+			mutex.Lock()
+			writeErr := fmt.Errorf("%sError writing stacktrace to %s output handle:\n%+v\n", prefix, tgtString, err)
 			mutex.Unlock()
 			return writeLength, writeErr
 		}
 	}
-	mutex.Unlock()
 	return writeLength, nil
 }
 
@@ -1819,25 +1924,37 @@ func (o *LvlOutput) stringOutput(s string, dying bool, exitVal int, detErrs ...D
 	var screenLength int
 	var logfileLength int
 
+	// Try and insure goroutine  safety as we read and write *LvlOutput
+	o.mu.Lock()
+	level := o.level
+	formatter := o.formatter
+	o.mu.Unlock()
+
+	mutex.Lock()
+	forScreen := ForScreen
+	forLogfile := ForLogfile
+	smartInsert := SmartInsert
+	mutex.Unlock()
+
 	// Grab the best stack trace we can find to use in case it's needed, but
 	// only for Issue, Error and Fatal levels of output (currently)... pass
 	// through any detailed error given by the user
 	var stackStr, screenStackTrace, logfileStackTrace string
-	if o.level >= LevelIssue {
+	if level >= LevelIssue {
 		stackStr = getStackTrace(detErr)
 		screenStackTrace = stackStr
 		logfileStackTrace = stackStr
-		if !o.stackTraceWanted(dying, exitVal, ForScreen) {
+		if !o.stackTraceWanted(dying, exitVal, forScreen) {
 			screenStackTrace = ""
 		}
-		if !o.stackTraceWanted(dying, exitVal, ForLogfile) {
+		if !o.stackTraceWanted(dying, exitVal, forLogfile) {
 			logfileStackTrace = ""
 		}
 	}
 
 	outputSkipMask := 0
 	skipNativePfx := false
-	if o.formatter != nil {
+	if formatter != nil {
 		// If the client has registered a formatting interface method then
 		// lets give it a spin, may adjust the output or suppress it alltogether
 		// to the screen and/or logfile.  Right now it gets the generic stack
@@ -1850,22 +1967,22 @@ func (o *LvlOutput) stringOutput(s string, dying bool, exitVal int, detErrs ...D
 		if detErr != nil {
 			code = Code(detErr)
 		}
-		s, outputSkipMask, skipNativePfx = o.formatter.FormatMessage(s, o.level, code, stackStr, dying)
+		s, outputSkipMask, skipNativePfx = formatter.FormatMessage(s, level, code, stackStr, dying)
 	}
 
 	// Lets see if screen (here) or logfile (below) output is active:
-	if o.level >= screenThreshold && o.level != LevelDiscard && outputSkipMask&ForScreen == 0 {
+	if level >= screenThreshold && level != LevelDiscard && outputSkipMask&forScreen == 0 {
 		// Screen output active based on output levels (and formatters, if any)
-		pfxScreenStr, suppressOutput := o.doPrefixing(s, ForScreen, SmartInsert, detErr, skipNativePfx)
+		pfxScreenStr, suppressOutput := o.doPrefixing(s, forScreen, smartInsert, detErr, skipNativePfx)
 
 		// Note that suppressOutput is for suppressing trace/debug output so
 		// only selected/desired packages have debug output dumped (currently)
 		if !suppressOutput {
 			pfxStackTrace := ""
 			if screenStackTrace != "" {
-				pfxStackTrace, _ = o.doPrefixing(screenStackTrace, ForScreen, SmartInsert, detErr, skipNativePfx)
+				pfxStackTrace, _ = o.doPrefixing(screenStackTrace, forScreen, smartInsert, detErr, skipNativePfx)
 			}
-			screenLength, err = o.writeOutput(pfxScreenStr, ForScreen, dying, exitVal, pfxStackTrace)
+			screenLength, err = o.writeOutput(pfxScreenStr, forScreen, dying, exitVal, pfxStackTrace)
 			if err != nil {
 				return screenLength, err
 			}
@@ -1873,8 +1990,8 @@ func (o *LvlOutput) stringOutput(s string, dying bool, exitVal int, detErrs ...D
 	}
 
 	// Print to the log file writer next (if needed):
-	if o.level >= logThreshold && o.level != LevelDiscard && outputSkipMask&ForLogfile == 0 {
-		pfxLogfileStr, suppressOutput := o.doPrefixing(s, ForLogfile, SmartInsert, detErr, skipNativePfx)
+	if level >= logThreshold && level != LevelDiscard && outputSkipMask&forLogfile == 0 {
+		pfxLogfileStr, suppressOutput := o.doPrefixing(s, forLogfile, smartInsert, detErr, skipNativePfx)
 		if skipNativePfx {
 			pfxLogfileStr = s
 		}
@@ -1883,9 +2000,9 @@ func (o *LvlOutput) stringOutput(s string, dying bool, exitVal int, detErrs ...D
 		if !suppressOutput {
 			pfxStackTrace := ""
 			if logfileStackTrace != "" {
-				pfxStackTrace, _ = o.doPrefixing(logfileStackTrace, ForLogfile, SmartInsert, detErr, skipNativePfx)
+				pfxStackTrace, _ = o.doPrefixing(logfileStackTrace, forLogfile, smartInsert, detErr, skipNativePfx)
 			}
-			logfileLength, err = o.writeOutput(pfxLogfileStr, ForLogfile, dying, exitVal, pfxStackTrace)
+			logfileLength, err = o.writeOutput(pfxLogfileStr, forLogfile, dying, exitVal, pfxStackTrace)
 			if err != nil {
 				return logfileLength + screenLength, err
 			}
@@ -1955,8 +2072,10 @@ func LevelWriter(l Level) *LvlOutput {
 // levels for each target handle, etc (and one could combine this io.Writer with
 // additional writers itself via io.MultiWriter even, crazy fun)
 func (o *LvlOutput) Write(p []byte) (n int, err error) {
+	mutex.Lock()
 	terminate := false
 	exitVal := 0
+	mutex.Unlock()
 	return o.stringOutput(string(p), terminate, exitVal)
 }
 
