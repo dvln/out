@@ -359,6 +359,7 @@ func levelCheck(level Level) Level {
 // DeferFunc returns a function type (reference type) if a defer func has
 // been set, see SetDeferFunc(), otherwise nil.  A defer function is one that
 // is fired right before os.Exit() is called by the'out' package.
+// WARNING: this is not goroutine safe, don't use this in goroutines
 func DeferFunc() func(exitVal int) {
 	return deferFunc
 }
@@ -379,6 +380,8 @@ func SetDeferFunc(dFunc func(exitVal int)) {
 // Threshold returns the current screen or logfile output threshold level
 // depending upon which is requested, either out.ForScreen or out.ForLogfile
 func Threshold(outputTgt int) Level {
+	mutex.Lock()
+	defer mutex.Unlock()
 	var threshold Level
 	if outputTgt&ForScreen != 0 {
 		threshold = screenThreshold
@@ -412,7 +415,7 @@ func SetThreshold(level Level, outputTgt int) {
 // file names within the "padded" flags output.  If you don't like the
 // default adjust via SetShortFileNameLength()
 func ShortFileNameLength() int32 {
-	return shortFileNameLength
+	return atomic.LoadInt32(&shortFileNameLength)
 }
 
 // SetShortFileNameLength will set the "assumed" padding around short
@@ -426,7 +429,7 @@ func SetShortFileNameLength(length int32) {
 // file names within the "padded" flags output.  If you don't like the
 // default adjust via SetLongFileNameLength()
 func LongFileNameLength() int32 {
-	return longFileNameLength
+	return atomic.LoadInt32(&longFileNameLength)
 }
 
 // SetLongFileNameLength will set the "assumed" padding around long
@@ -440,7 +443,7 @@ func SetLongFileNameLength(length int32) {
 // func names within the "padded" flags output.  If you don't like the
 // default adjust via SetShortFuncNameLength()
 func ShortFuncNameLength() int32 {
-	return shortFuncNameLength
+	return atomic.LoadInt32(&shortFuncNameLength)
 }
 
 // SetShortFuncNameLength will set the "assumed" padding around short
@@ -454,7 +457,7 @@ func SetShortFuncNameLength(length int32) {
 // func names within the "padded" flags output.  If you don't like the
 // default adjust via SetLongFuncNameLength()
 func LongFuncNameLength() int32 {
-	return longFuncNameLength
+	return atomic.LoadInt32(&longFuncNameLength)
 }
 
 // SetLongFuncNameLength will set the "assumed" padding around long
@@ -467,7 +470,7 @@ func SetLongFuncNameLength(length int32) {
 // CallDepth is to retrieve the current call depth... see SetCallDepth for
 // details if needed.
 func CallDepth() int32 {
-	return callDepth
+	return atomic.LoadInt32(&callDepth)
 }
 
 // SetCallDepth is for runtime.Caller() to identify where a Noteln() or Print()
@@ -485,7 +488,7 @@ func SetCallDepth(depth int32) {
 // out package (defaults to -1).  Returns an int32 due to use of sync/atomic
 // for setting this internally.
 func ErrorExitVal() int32 {
-	return errorExitVal
+	return atomic.LoadInt32(&errorExitVal)
 }
 
 // SetErrorExitVal will set the preferred error exit value (what the pkg 'out'
@@ -702,7 +705,10 @@ func ResetNewline(val bool, outputTgt int) {
 
 // LogFileName returns any known log file name (if none returns "")
 func LogFileName() string {
-	return logFileName
+	mutex.Lock()
+	safeLogFileName := logFileName
+	mutex.Unlock()
+	return safeLogFileName
 }
 
 // SetLogFile uses a log file path (passed in) to result in the log file
@@ -741,16 +747,15 @@ func UseTempLogFile(prefix string) string {
 	}
 	// Safely adjust these settings
 	mutex.Lock()
-	{
-		logFileName = file.Name()
-	}
+	logFileName = file.Name()
+	safeLogFileName := logFileName
 	mutex.Unlock()
 	for _, o := range outputters {
 		o.mu.Lock()
 		defer o.mu.Unlock()
 		o.logfileHndl = file
 	}
-	return logFileName
+	return safeLogFileName
 }
 
 // Next we head into the <Level>() class methods which don't add newlines
@@ -873,7 +878,7 @@ func ErrorExit(exitVal int, v ...interface{}) {
 func Fatal(v ...interface{}) {
 	mutex.Lock()
 	terminate := true
-	exitVal := int(errorExitVal)
+	exitVal := int(atomic.LoadInt32(&errorExitVal))
 	mutex.Unlock()
 	FATAL.output(terminate, exitVal, v...)
 }
@@ -1007,7 +1012,7 @@ func ErrorExitln(exitVal int, v ...interface{}) {
 func Fatalln(v ...interface{}) {
 	mutex.Lock()
 	terminate := true
-	exitVal := int(errorExitVal)
+	exitVal := int(atomic.LoadInt32(&errorExitVal))
 	mutex.Unlock()
 	FATAL.outputln(terminate, exitVal, v...)
 }
@@ -1127,7 +1132,7 @@ func ErrorExitf(exitVal int, format string, v ...interface{}) {
 func Fatalf(format string, v ...interface{}) {
 	mutex.Lock()
 	terminate := true
-	exitVal := int(errorExitVal)
+	exitVal := int(atomic.LoadInt32(&errorExitVal))
 	mutex.Unlock()
 	FATAL.outputf(terminate, exitVal, format, v...)
 }
@@ -1189,7 +1194,7 @@ func getStackTrace(detErr DetailedError, depth ...int) string {
 	} else {
 		// Not a DetailedError, lets get a stack trace relative to the call
 		// to the 'out' pkg API (eg: out.Error("whatever"), where user called)
-		myDepth := int(callDepth)
+		myDepth := int(atomic.LoadInt32(&callDepth))
 		if depth != nil {
 			myDepth = depth[0]
 		}
@@ -1295,11 +1300,13 @@ func (o *LvlOutput) output(terminal bool, exitVal int, v ...interface{}) {
 			fmt.Fprintf(os.Stderr, "%s", err)
 		}
 		mutex.Unlock()
+		mutex.RLock()
 		if deferFunc != nil {
-			deferFunc(int(errorExitVal))
+			deferFunc(int(atomic.LoadInt32(&errorExitVal)))
 		}
+		mutex.RUnlock()
 		if os.Getenv("PKG_OUT_NO_EXIT") != "1" {
-			os.Exit(int(errorExitVal))
+			os.Exit(int(atomic.LoadInt32(&errorExitVal)))
 		}
 	}
 }
@@ -1324,11 +1331,13 @@ func (o *LvlOutput) outputln(terminal bool, exitVal int, v ...interface{}) {
 			fmt.Fprintf(os.Stderr, "%s", err)
 		}
 		mutex.Unlock()
+		mutex.RLock()
 		if deferFunc != nil {
-			deferFunc(int(errorExitVal))
+			deferFunc(int(atomic.LoadInt32(&errorExitVal)))
 		}
+		mutex.RUnlock()
 		if os.Getenv("PKG_OUT_NO_EXIT") != "1" {
-			os.Exit(int(errorExitVal))
+			os.Exit(int(atomic.LoadInt32(&errorExitVal)))
 		}
 	}
 }
@@ -1353,11 +1362,13 @@ func (o *LvlOutput) outputf(terminal bool, exitVal int, format string, v ...inte
 			fmt.Fprintf(os.Stderr, "%s", err)
 		}
 		mutex.Unlock()
+		mutex.RLock()
 		if deferFunc != nil {
-			deferFunc(int(errorExitVal))
+			deferFunc(int(atomic.LoadInt32(&errorExitVal)))
 		}
+		mutex.RUnlock()
 		if os.Getenv("PKG_OUT_NO_EXIT") != "1" {
-			os.Exit(int(errorExitVal))
+			os.Exit(int(atomic.LoadInt32(&errorExitVal)))
 		}
 	}
 }
@@ -1368,7 +1379,9 @@ func (o *LvlOutput) outputf(terminal bool, exitVal int, format string, v ...inte
 // and if we have a non-zero exit value or not... and how stack traces have
 // been set up by the client (via API or env settings, env takes precendence)
 func (o *LvlOutput) stackTraceWanted(terminal bool, exitVal int, outputTgt int) bool {
+	mutex.Lock()
 	stackCfg := stackTraceConfig
+	defer mutex.Unlock()
 	val := os.Getenv("PKG_OUT_STACK_TRACE_CONFIG")
 	if val != "" {
 		newCfg := 0
@@ -1442,11 +1455,13 @@ func (o *LvlOutput) exit(exitVal int) {
 	mutex.Lock()
 	stacktrace := getStackTrace(nil, int(CallDepth())-1)
 	terminal := true
+	safeLogThreshold := logThreshold
+	safeScreenThreshold := screenThreshold
 	mutex.Unlock()
 	o.mu.Lock()
 	level := o.level
 	o.mu.Unlock()
-	if stacktrace != "" && o.stackTraceWanted(terminal, exitVal, ForScreen) && level >= screenThreshold && level != LevelDiscard {
+	if stacktrace != "" && o.stackTraceWanted(terminal, exitVal, ForScreen) && level >= safeScreenThreshold && level != LevelDiscard {
 		msg, suppressOutput := o.doPrefixing(stacktrace, ForScreen, SmartInsert, nil, false)
 		if !suppressOutput {
 			mutex.Lock()
@@ -1454,26 +1469,30 @@ func (o *LvlOutput) exit(exitVal int) {
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%sError writing stacktrace to screen output handle:\n%+v\n", o.prefix, err)
 				mutex.Unlock()
+				mutex.RLock()
 				if deferFunc != nil {
-					deferFunc(int(errorExitVal))
+					deferFunc(int(atomic.LoadInt32(&errorExitVal)))
 				}
+				mutex.RUnlock()
 				if os.Getenv("PKG_OUT_NO_EXIT") != "1" {
-					os.Exit(int(errorExitVal))
+					os.Exit(int(atomic.LoadInt32(&errorExitVal)))
 				}
 				mutex.Lock()
 			}
 			mutex.Unlock()
 		}
 	}
-	if stacktrace != "" && o.stackTraceWanted(terminal, exitVal, ForLogfile) && level >= logThreshold && level != LevelDiscard {
+	if stacktrace != "" && o.stackTraceWanted(terminal, exitVal, ForLogfile) && level >= safeLogThreshold && level != LevelDiscard {
 		msg, suppressOutput := o.doPrefixing(stacktrace, ForLogfile, SmartInsert, nil, false)
 		if !suppressOutput {
 			o.logfileHndl.Write([]byte(msg))
 		}
 	}
+	mutex.RLock()
 	if deferFunc != nil {
 		deferFunc(exitVal)
 	}
+	mutex.RUnlock()
 	if os.Getenv("PKG_OUT_NO_EXIT") != "1" {
 		os.Exit(exitVal)
 	}
@@ -1542,9 +1561,9 @@ func getFlagString(buf *[]byte, flags int, level Level, funcName string, file st
 		}
 	}
 	if flags&(Lshortfile|Llongfile) != 0 {
-		formatLen := int(longFileNameLength)
+		formatLen := int(atomic.LoadInt32(&longFileNameLength))
 		if flags&Lshortfile != 0 {
-			formatLen = int(shortFileNameLength)
+			formatLen = int(atomic.LoadInt32(&shortFileNameLength))
 			short := file
 			for i := len(file) - 1; i > 0; i-- {
 				if file[i] == '/' {
@@ -1560,7 +1579,7 @@ func getFlagString(buf *[]byte, flags int, level Level, funcName string, file st
 		*tmpslice = append(*tmpslice, ':')
 		itoa(tmpslice, line, -1)
 		if flags&Lshortfunc != 0 {
-			formatLen = formatLen + int(shortFuncNameLength)
+			formatLen = formatLen + int(atomic.LoadInt32(&shortFuncNameLength))
 			parts := strings.Split(funcName, ".")
 			var justFunc string
 			if len(parts) > 1 {
@@ -1571,7 +1590,7 @@ func getFlagString(buf *[]byte, flags int, level Level, funcName string, file st
 			*tmpslice = append(*tmpslice, ':')
 			*tmpslice = append(*tmpslice, justFunc...)
 		} else if flags&Llongfunc != 0 {
-			formatLen = formatLen + int(longFuncNameLength)
+			formatLen = formatLen + int(atomic.LoadInt32(&longFuncNameLength))
 			*tmpslice = append(*tmpslice, ':')
 			*tmpslice = append(*tmpslice, funcName...)
 		} else {
@@ -1674,7 +1693,7 @@ func (o *LvlOutput) insertFlagMetadata(s string, outputTgt int, ctrl int) (strin
 		os.Getenv("PKG_OUT_DEBUG_SCOPE") != "" {
 		var ok bool
 		var pc uintptr
-		pc, file, line, ok = runtime.Caller(int(callDepth))
+		pc, file, line, ok = runtime.Caller(int(atomic.LoadInt32(&callDepth)))
 		if !ok {
 			file = "???"
 			line = 0
@@ -1934,6 +1953,8 @@ func (o *LvlOutput) stringOutput(s string, dying bool, exitVal int, detErrs ...D
 	forScreen := ForScreen
 	forLogfile := ForLogfile
 	smartInsert := SmartInsert
+	safeScreenThreshold := screenThreshold
+	safeLogThreshold := logThreshold
 	mutex.Unlock()
 
 	// Grab the best stack trace we can find to use in case it's needed, but
@@ -1971,7 +1992,7 @@ func (o *LvlOutput) stringOutput(s string, dying bool, exitVal int, detErrs ...D
 	}
 
 	// Lets see if screen (here) or logfile (below) output is active:
-	if level >= screenThreshold && level != LevelDiscard && outputSkipMask&forScreen == 0 {
+	if level >= safeScreenThreshold && level != LevelDiscard && outputSkipMask&forScreen == 0 {
 		// Screen output active based on output levels (and formatters, if any)
 		pfxScreenStr, suppressOutput := o.doPrefixing(s, forScreen, smartInsert, detErr, skipNativePfx)
 
@@ -1990,7 +2011,7 @@ func (o *LvlOutput) stringOutput(s string, dying bool, exitVal int, detErrs ...D
 	}
 
 	// Print to the log file writer next (if needed):
-	if level >= logThreshold && level != LevelDiscard && outputSkipMask&forLogfile == 0 {
+	if level >= safeLogThreshold && level != LevelDiscard && outputSkipMask&forLogfile == 0 {
 		pfxLogfileStr, suppressOutput := o.doPrefixing(s, forLogfile, smartInsert, detErr, skipNativePfx)
 		if skipNativePfx {
 			pfxLogfileStr = s
@@ -2011,11 +2032,13 @@ func (o *LvlOutput) stringOutput(s string, dying bool, exitVal int, detErrs ...D
 	// if we're dying off then we need to exit unless overrides in play,
 	// this env var should be used for test suites only really...
 	if dying {
+		mutex.RLock()
 		if deferFunc != nil {
-			deferFunc(int(errorExitVal))
+			deferFunc(int(atomic.LoadInt32(&errorExitVal)))
 		}
+		mutex.RUnlock()
 		if os.Getenv("PKG_OUT_NO_EXIT") != "1" {
-			os.Exit(int(errorExitVal))
+			os.Exit(int(atomic.LoadInt32(&errorExitVal)))
 		}
 	}
 	// if all good return all the bytes we wrote to *both* targets and nil err
