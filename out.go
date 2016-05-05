@@ -231,7 +231,7 @@ type Level int
 // way to push output through the screen/log writers that are set up.
 // Note: should create a LvlOutputter interface one of these days, no?
 type LvlOutput struct {
-	mu          sync.Mutex // ensures atomic writes; protects these fields:
+	mu          sync.RWMutex // ensures atomic writes; protects these fields:
 	level       Level      // below data tells how each logging level works
 	prefix      string     // prefix for this logging level (if any)
 	buf         []byte     // for accumulating text to write at this level
@@ -547,8 +547,8 @@ func Prefix(level Level) string {
 	}
 	var prefix string
 	for _, o := range outputters {
-		o.mu.Lock()
-		defer o.mu.Unlock()
+		o.mu.RLock()
+		defer o.mu.RUnlock()
 		if o.level == level {
 			prefix = o.prefix
 			break
@@ -595,11 +595,11 @@ func Flags(level Level, outputTgt int) int {
 	level = levelCheck(level)
 	var flags int
 	for _, o := range outputters {
-		o.mu.Lock()
+		o.mu.RLock()
 		sF := o.screenFlags
 		lF := o.logFlags
 		outLvl := o.level
-		o.mu.Unlock()
+		o.mu.RUnlock()
 		if outLvl == level {
 			if outputTgt&ForScreen != 0 {
 				flags = sF
@@ -643,8 +643,8 @@ func Writer(level Level, outputTgt int) io.Writer {
 	level = levelCheck(level)
 	writer := ioutil.Discard
 	for _, o := range outputters {
-		o.mu.Lock()
-		defer o.mu.Unlock()
+		o.mu.RLock()
+		defer o.mu.RUnlock()
 		if o.level == level {
 			if outputTgt&ForScreen != 0 {
 				writer = o.screenHndl
@@ -1414,9 +1414,9 @@ func (o *LvlOutput) stackTraceWanted(terminal bool, exitVal int, outputTgt int) 
 	if stackCfg&outputTgt == 0 {
 		return false
 	}
-	o.mu.Lock()
+	o.mu.RLock()
 	level := o.level
-	o.mu.Unlock()
+	o.mu.RUnlock()
 	// Now see if the detailed config really implies a stack trace is wanted...
 	if stackCfg&StackTraceNonZeroErrorExit != 0 {
 		// config indicates only terminal non-zero exit should have stack trace
@@ -1458,9 +1458,9 @@ func (o *LvlOutput) exit(exitVal int) {
 	safeLogThreshold := logThreshold
 	safeScreenThreshold := screenThreshold
 	mutex.Unlock()
-	o.mu.Lock()
+	o.mu.RLock()
 	level := o.level
-	o.mu.Unlock()
+	o.mu.RUnlock()
 	if stacktrace != "" && o.stackTraceWanted(terminal, exitVal, ForScreen) && level >= safeScreenThreshold && level != LevelDiscard {
 		msg, suppressOutput := o.doPrefixing(stacktrace, ForScreen, SmartInsert, nil, false)
 		if !suppressOutput {
@@ -1502,7 +1502,6 @@ func (o *LvlOutput) exit(exitVal int) {
 // avoid zero-padding.  Knows the buffer has capacity.  Taken from Go's 'log'
 // pkg since we want some of the same formatting.
 func itoa(buf *[]byte, i int, wid int) {
-	mutex.Lock()
 	u := uint(i)
 	if u == 0 && wid <= 1 {
 		*buf = append(*buf, '0')
@@ -1517,7 +1516,6 @@ func itoa(buf *[]byte, i int, wid int) {
 		b[bp] = byte(u%10) + '0'
 	}
 	*buf = append(*buf, b[bp:]...)
-	mutex.Unlock()
 }
 
 // getFlagString takes the time the output func was called and tries
@@ -1665,11 +1663,11 @@ func (o *LvlOutput) insertFlagMetadata(s string, outputTgt int, ctrl int) (strin
 	var flags int
 	var suppressOutput bool
 	var level Level
-	o.mu.Lock()
+	o.mu.RLock()
 	lvlOutLevel := o.level
 	sF := o.screenFlags
 	lF := o.logFlags
-	o.mu.Unlock()
+	o.mu.RUnlock()
 	// if printing to the screen target use those flags, else use logfile flags
 	if outputTgt&ForScreen != 0 {
 		if str := os.Getenv("PKG_OUT_SCREEN_FLAGS"); str != "" {
@@ -1827,9 +1825,9 @@ func (o *LvlOutput) doPrefixing(s string, outputTgt int, ctrl int, detErr Detail
 	if detErr != nil {
 		errCode = Code(detErr)
 	}
-	o.mu.Lock()
+	o.mu.RLock()
 	prefix := o.prefix
-	o.mu.Unlock()
+	o.mu.RUnlock()
 	s = InsertPrefix(s, prefix, ctrl, errCode)
 
 	if os.Getenv("PKG_OUT_SMART_FLAGS_PREFIX") == "off" {
@@ -1860,20 +1858,22 @@ func (o *LvlOutput) doPrefixing(s string, outputTgt int, ctrl int, detErr Detail
 // - error: if any unexpected write error occurred this will be a raw Go error
 func (o *LvlOutput) writeOutput(s string, outputTgt int, dying bool, exitVal int, stacktrace string) (int, error) {
 	tgtString := "logfile"
-	o.mu.Lock()
+	o.mu.RLock()
 	prefix := o.prefix
 	hndl := o.logfileHndl
+	o.mu.RUnlock()
 	mutex.Lock()
 	tgtStreamNewline := &logfileNewline
 	mutex.Unlock()
 	if outputTgt&ForScreen == 1 {
 		tgtString = "screen"
+		o.mu.RLock()
 		hndl = o.screenHndl
+		o.mu.RUnlock()
 		mutex.Lock()
 		tgtStreamNewline = &screenNewline
 		mutex.Unlock()
 	}
-	o.mu.Unlock()
 	writeLength := 0
 
 	// Safely do writes and adjust settings as needed
@@ -1943,11 +1943,11 @@ func (o *LvlOutput) stringOutput(s string, dying bool, exitVal int, detErrs ...D
 	var screenLength int
 	var logfileLength int
 
-	// Try and insure goroutine  safety as we read and write *LvlOutput
-	o.mu.Lock()
+	// Try and insure goroutine safety as we read and write *LvlOutput
+	o.mu.RLock()
 	level := o.level
 	formatter := o.formatter
-	o.mu.Unlock()
+	o.mu.RUnlock()
 
 	mutex.Lock()
 	forScreen := ForScreen
