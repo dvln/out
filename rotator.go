@@ -12,6 +12,7 @@ import (
 	"time"
 )
 
+// RotateWriter is an io.Writer that can rotate log files.
 type RotateWriter struct {
 	lock     sync.Mutex
 	filename string // should be set to the actual filename
@@ -37,7 +38,7 @@ func (w *RotateWriter) Write(output []byte) (int, error) {
 	return w.fp.Write(output)
 }
 
-// Perform the actual act of rotating and reopening file.
+// Rotate performs the actual act of rotating and reopening file.
 func (w *RotateWriter) Rotate() error {
 	w.lock.Lock()
 	defer w.lock.Unlock()
