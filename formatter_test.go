@@ -1,4 +1,4 @@
-// Copyright © 2015 Erik Brady <brady@dvln.org>
+// Copyright © 2015-2016 Erik Brady <brady@dvln.org>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,33 +32,48 @@ import (
 type killScreenOut struct{}
 type replaceMsg struct{}
 type detectDying struct{}
+type logOnlyFormatMsg struct{}
 
 // FormatMessage in this context is to test the formatting "feature" of
-// the 'out' package.
-func (f killScreenOut) FormatMessage(msg string, outLevel Level, code int, stack string, dying bool) (string, int, bool) {
+// the 'out' package.  In this case we're suppressing all screen output
+func (f killScreenOut) FormatMessage(msg string, outLevel Level, code int, stack string, dying bool, mdata FlagMetadata) (string, int, int, bool) {
+	applyMask := ForBoth
 	suppressOutputMask := ForScreen
 	suppressNativePrefixing := false
-	return msg, suppressOutputMask, suppressNativePrefixing
+	return msg, applyMask, suppressOutputMask, suppressNativePrefixing
 }
 
 // FormatMessage in this context is to test the formatting "feature" of
-// the 'out' package to see if it will suppress the
-func (f replaceMsg) FormatMessage(msg string, outLevel Level, code int, stack string, dying bool) (string, int, bool) {
+// the 'out' package to see if it will suppress the native prefixing
+func (f replaceMsg) FormatMessage(msg string, outLevel Level, code int, stack string, dying bool, mdata FlagMetadata) (string, int, int, bool) {
 	msg = "Replacement message, joy joy joy"
+	applyMask := ForBoth
 	suppressOutputMask := ForLogfile
 	suppressNativePrefixing := true
-	return msg, suppressOutputMask, suppressNativePrefixing
+	return msg, applyMask, suppressOutputMask, suppressNativePrefixing
+}
+
+// FormatMessage in this context is to test the formatting "feature" of
+// the 'out' package to format only the logging side of the messaging while
+// the screen side prints in standard format
+func (f logOnlyFormatMsg) FormatMessage(msg string, outLevel Level, code int, stack string, dying bool, mdata FlagMetadata) (string, int, int, bool) {
+	msg = fmt.Sprintf("Formatted!: \"%s\", metadata:\n\"%+v\"\n", msg, mdata)
+	applyMask := ForLogfile
+	suppressOutputMask := 0
+	suppressNativePrefixing := true
+	return msg, applyMask, suppressOutputMask, suppressNativePrefixing
 }
 
 // FormatMessage in this context is to test the formatting "feature" of
 // the 'out' package.
-func (f detectDying) FormatMessage(msg string, outLevel Level, code int, stack string, dying bool) (string, int, bool) {
+func (f detectDying) FormatMessage(msg string, outLevel Level, code int, stack string, dying bool, mdata FlagMetadata) (string, int, int, bool) {
 	if dying {
 		msg = fmt.Sprintf("Looks like we are dying [DYING #%d]", code)
 	}
+	applyMask := ForBoth
 	suppressOutputMask := 0
 	suppressNativePrefixing := false
-	return msg, suppressOutputMask, suppressNativePrefixing
+	return msg, applyMask, suppressOutputMask, suppressNativePrefixing
 }
 
 func TestFormatter(t *testing.T) {
@@ -121,6 +136,37 @@ func TestFormatter(t *testing.T) {
 	assert.NotContains(t, screenErrStr, "Stack Trace:")
 	assert.NotContains(t, screenErrStr, "Error #1205:")
 	assert.Contains(t, screenErrStr, "Replacement message, joy joy joy")
+
+	// Now reset the most common things for the 'out' pkg so the next test
+	// func will operate sanely as if we're coming in fresh
+	ResetOutPkg()
+
+	screenBuf = new(bytes.Buffer)
+	logfileBuf = new(bytes.Buffer)
+	SetWriter(LevelAll, screenBuf, ForScreen)
+	SetWriter(LevelAll, logfileBuf, ForLogfile)
+	SetThreshold(LevelTrace, ForScreen)
+	SetThreshold(LevelTrace, ForLogfile)
+	// This formatter causes logfile data to be formatted, not screen data
+	var logFormatMsg logOnlyFormatMsg
+	SetFormatter(LevelAll, logFormatMsg)
+
+	// OK, redirected the 'out' package into a buffer and adjusted output
+	// thresholds for our test (to screen) and fire up an error:
+	Error(outerError)
+
+	// Grab that error from the buffer and check it out
+	screenErrStr = screenBuf.String()
+	logfileErrStr = logfileBuf.String()
+
+	assert.NotContains(t, screenErrStr, "Formatted!")
+	assert.NotContains(t, screenErrStr, "{Time:")
+	assert.NotContains(t, screenErrStr, "Func:")
+	assert.NotContains(t, screenErrStr, "LineNo:")
+	assert.Contains(t, logfileErrStr, "Formatted!")
+	assert.Contains(t, logfileErrStr, "{Time:")
+	assert.Contains(t, logfileErrStr, "Func:")
+	assert.Contains(t, logfileErrStr, "LineNo:")
 
 	// Now reset the most common things for the 'out' pkg so the next test
 	// func will operate sanely as if we're coming in fresh

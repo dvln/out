@@ -1,4 +1,4 @@
-// Copyright © 2015 Erik Brady <brady@dvln.org>
+// Copyright © 2015-2016 Erik Brady <brady@dvln.org>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -58,7 +58,7 @@ package out
 // all off, no problem, well before getting here).
 type Formatter interface {
 	// This returns the error message without the stack trace.
-	FormatMessage(msg string, outLevel Level, code int, stack string, dying bool) (string, int, bool)
+	FormatMessage(msg string, outLevel Level, code int, stack string, dying bool, mdata FlagMetadata) (string, int, int, bool)
 }
 
 // SetFormatter sets a formatter against the output package so that output

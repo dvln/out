@@ -113,6 +113,7 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -232,14 +233,27 @@ type Level int
 // Note: should create a LvlOutputter interface one of these days, no?
 type LvlOutput struct {
 	mu          sync.RWMutex // ensures atomic writes; protects these fields:
-	level       Level      // below data tells how each logging level works
-	prefix      string     // prefix for this logging level (if any)
-	buf         []byte     // for accumulating text to write at this level
-	screenHndl  io.Writer  // io.Writer for "screen" output
-	screenFlags int        // flags: additional metadata on screen output
-	logfileHndl io.Writer  // io.Writer for "logfile" output
-	logFlags    int        // flags: additional metadata on logfile output
-	formatter   Formatter  // optional output formatting extension/plugin
+	level       Level        // below data tells how each logging level works
+	prefix      string       // prefix for this logging level (if any)
+	buf         []byte       // for accumulating text to write at this level
+	screenHndl  io.Writer    // io.Writer for "screen" output
+	screenFlags int          // flags: additional metadata on screen output
+	logfileHndl io.Writer    // io.Writer for "logfile" output
+	logFlags    int          // flags: additional metadata on logfile output
+	formatter   Formatter    // optional output formatting extension/plugin
+}
+
+// FlagMetadata stores the various log add-on fields that a client can request
+// such as a timestamp, the log level, the package, routine and line number
+// information, pid, etc
+type FlagMetadata struct {
+	Time   *time.Time `json:"time,omitempty"`
+	Path   string     `json:"path,omitempty"`
+	File   string     `json:"file,omitempty"`
+	Func   string     `json:"func,omitempty"`
+	LineNo int        `json:"lineno,omitempty"`
+	Level  string     `json:"level,omitempty"`
+	PID    int        `json:"pid,omitempty"`
 }
 
 var (
@@ -1462,8 +1476,8 @@ func (o *LvlOutput) exit(exitVal int) {
 	level := o.level
 	o.mu.RUnlock()
 	if stacktrace != "" && o.stackTraceWanted(terminal, exitVal, ForScreen) && level >= safeScreenThreshold && level != LevelDiscard {
-		msg, suppressOutput := o.doPrefixing(stacktrace, ForScreen, SmartInsert, nil, false)
-		if !suppressOutput {
+		msg, _, suppressOutput := o.doPrefixing(stacktrace, ForScreen, SmartInsert, nil, false)
+		if !suppressOutput && msg != "" {
 			mutex.Lock()
 			_, err := o.screenHndl.Write([]byte(msg))
 			if err != nil {
@@ -1483,8 +1497,8 @@ func (o *LvlOutput) exit(exitVal int) {
 		}
 	}
 	if stacktrace != "" && o.stackTraceWanted(terminal, exitVal, ForLogfile) && level >= safeLogThreshold && level != LevelDiscard {
-		msg, suppressOutput := o.doPrefixing(stacktrace, ForLogfile, SmartInsert, nil, false)
-		if !suppressOutput {
+		msg, _, suppressOutput := o.doPrefixing(stacktrace, ForLogfile, SmartInsert, nil, false)
+		if !suppressOutput && msg != "" {
 			o.logfileHndl.Write([]byte(msg))
 		}
 	}
@@ -1654,30 +1668,46 @@ func determineFlags(flagStr string) int {
 // here is either ForScreen or ForLogfile (constants) for output.  Note that
 // it will also return a boolean to indicate if the output should be supressed
 // or not (typically not but one can filter debug/trace output and if one has
-// set PKG_OUT_DEBUG_SCOPE, see env var elsewhere in this pkg for doc)
-func (o *LvlOutput) insertFlagMetadata(s string, outputTgt int, ctrl int) (string, bool) {
+// set PKG_OUT_DEBUG_SCOPE, see env var elsewhere in this pkg for doc), params:
+//	s (string): the string to insert flag meta-data into
+//	outputTgt (int): where output goes, ForScreen, ForLogfile or ForBoth
+//	ctrl (int): how to insert the prefix (can be combined via 'or')
+//		AlwaysInsert      // Prefix every line, regardless of output history
+//		BlankInsert       // Only spaces inserted (same length as prefix)
+//		SkipFirstLine     // 1st line in multi-line string has no prefix
+//		SmartInsert       // See doPrefixing(), only handled there now
+//	overrideFlags (*int): get flags not from 'o' but here, else set to nil
+//	ignoreEnv (bool): ignore any env overrides/filters (eg: formatter wants all)
+// Returns the update msg string, any flag metadata available and if the output
+// should be suppressed (such as if debug scope doesn't include this module)
+func (o *LvlOutput) insertFlagMetadata(s string, outputTgt int, ctrl int, overrideFlags *int, ignoreEnv bool) (string, *FlagMetadata, bool) {
 	now := time.Now() // do this before Caller below, can take some time
-	var file string
-	var funcName string
-	var line int
-	var flags int
+	var file, funcName string
+	var line, flags int
 	var suppressOutput bool
 	var level Level
+	flagMetadata := &FlagMetadata{}
 	o.mu.RLock()
 	lvlOutLevel := o.level
 	sF := o.screenFlags
 	lF := o.logFlags
+	if overrideFlags != nil {
+		sF = *overrideFlags
+		lF = *overrideFlags
+	}
 	o.mu.RUnlock()
+	flagMetadata.Level = fmt.Sprintf("%s", lvlOutLevel)
+	flagMetadata.Time = &now
 	// if printing to the screen target use those flags, else use logfile flags
 	if outputTgt&ForScreen != 0 {
-		if str := os.Getenv("PKG_OUT_SCREEN_FLAGS"); str != "" {
+		if str := os.Getenv("PKG_OUT_SCREEN_FLAGS"); !ignoreEnv && str != "" {
 			flags = determineFlags(str)
 		} else {
 			flags = sF
 		}
 		level = lvlOutLevel
 	} else if outputTgt&ForLogfile != 0 {
-		if str := os.Getenv("PKG_OUT_LOGFILE_FLAGS"); str != "" {
+		if str := os.Getenv("PKG_OUT_LOGFILE_FLAGS"); !ignoreEnv && str != "" {
 			flags = determineFlags(str)
 		} else {
 			flags = lF
@@ -1688,7 +1718,7 @@ func (o *LvlOutput) insertFlagMetadata(s string, outputTgt int, ctrl int) (strin
 	}
 	suppressOutput = false
 	if flags&(Lshortfile|Llongfile|Lshortfunc|Llongfunc) != 0 ||
-		os.Getenv("PKG_OUT_DEBUG_SCOPE") != "" {
+		(!ignoreEnv && os.Getenv("PKG_OUT_DEBUG_SCOPE") != "") {
 		var ok bool
 		var pc uintptr
 		pc, file, line, ok = runtime.Caller(int(atomic.LoadInt32(&callDepth)))
@@ -1704,34 +1734,41 @@ func (o *LvlOutput) insertFlagMetadata(s string, outputTgt int, ctrl int) (strin
 				funcName = f.Name()
 			}
 		}
-		// if the user has restricted debugging output to specific packages
-		// or methods (funcname might be "github.com/dvln/out.MethodName")
-		// then we'll supress all debug output outside of the desired scope and
-		// only show those packages or methods of interest... simple substring
-		// match is done currently
-		if debugScope := os.Getenv("PKG_OUT_DEBUG_SCOPE"); funcName != "???" && debugScope != "" && (lvlOutLevel == LevelDebug || lvlOutLevel == LevelTrace) {
-			scopeParts := strings.Split(debugScope, ",")
-			suppressOutput = true
-			for _, scopePart := range scopeParts {
-				if strings.Contains(funcName, scopePart) {
-					suppressOutput = false
-					break
+		if !ignoreEnv {
+			// If the user has restricted debugging output to specific packages
+			// or methods (funcname might be "github.com/dvln/out.MethodName")
+			// then suppress all debug output outside of the desired scope and
+			// only show those packages or methods of interest... simple substr
+			// match is done currently
+			if debugScope := os.Getenv("PKG_OUT_DEBUG_SCOPE"); funcName != "???" && debugScope != "" && (lvlOutLevel == LevelDebug || lvlOutLevel == LevelTrace) {
+				scopeParts := strings.Split(debugScope, ",")
+				suppressOutput = true
+				for _, scopePart := range scopeParts {
+					if strings.Contains(funcName, scopePart) {
+						suppressOutput = false
+						break
+					}
 				}
 			}
 		}
+		flagMetadata.Func = funcName
+		flagMetadata.File = filepath.Base(file)
+		flagMetadata.Path = filepath.Dir(file)
+		flagMetadata.LineNo = line
 	}
 	o.mu.Lock()
 	o.buf = o.buf[:0]
 	leader := getFlagString(&o.buf, flags, level, funcName, file, line, now)
+	flagMetadata.PID = os.Getpid()
 	o.mu.Unlock()
 	if leader == "" {
-		return s, suppressOutput
+		return s, flagMetadata, suppressOutput
 	}
 	// Use 0 as the error code as we don't want to try and insert any error
 	// code in standard flags prefix (that's only needed for errs/warnings),
 	// so just do a full prefixing of the flags data
 	s = InsertPrefix(s, leader, ctrl, 0)
-	return s, suppressOutput
+	return s, flagMetadata, suppressOutput
 }
 
 // doPrefixing takes the users output string and decides how to prefix
@@ -1773,7 +1810,7 @@ func (o *LvlOutput) insertFlagMetadata(s string, outputTgt int, ctrl int) (strin
 //   <date/time> myfile.go:13: Note: and only a test
 //   <date/time> myfile.go:14: Note: that I am showing to John
 // The only thing we "lose" here potentially is that the line that prints
-// the username isn't be prefixed to keep the output clean (no line #15 details)
+// the username isn't prefixed to keep the output clean (no line #15 details)
 // hence we don't have a date/timestamp for that "part" of the output and that
 // could cause someone to think it was line 14 that was slow if the next entry
 // was 20 minutes later (eg: the myfile.go line 16 print statement).  There is
@@ -1801,8 +1838,8 @@ func (o *LvlOutput) insertFlagMetadata(s string, outputTgt int, ctrl int) (strin
 //   <date/time> myfile.go:37: Fatal: Severe error, giving up
 //   <date/time> myfile.go:37: Fatal:
 //   <date/time> myfile.go:37: Fatal: Stack Trace: <multiline stacktrace here>
-func (o *LvlOutput) doPrefixing(s string, outputTgt int, ctrl int, detErr DetailedError, checkSuppressOnly bool) (string, bool) {
-	// where we check out if we previously had no newline and if so the
+func (o *LvlOutput) doPrefixing(s string, outputTgt int, ctrl int, detErr DetailedError, checkSuppressOnly bool) (string, *FlagMetadata, bool) {
+	// Where we check out if we previously had no newline and if so the
 	// first line (if multiline) will not have the prefix, see example
 	// in function header around username
 	origString := s
@@ -1828,19 +1865,21 @@ func (o *LvlOutput) doPrefixing(s string, outputTgt int, ctrl int, detErr Detail
 	o.mu.RLock()
 	prefix := o.prefix
 	o.mu.RUnlock()
+	// Insert prefix for this logging level
 	s = InsertPrefix(s, prefix, ctrl, errCode)
 
 	if os.Getenv("PKG_OUT_SMART_FLAGS_PREFIX") == "off" {
 		ctrl = AlwaysInsert // forcibly add prefix without smarts
 	}
-	// now set up metadata prefix (eg: timestamp), if any, same as above
+	// Now set up metadata prefix (eg: timestamp), if any, same as above
 	// it has the brains to not add in a prefix if not needed or wanted
 	var suppressOutput bool
-	s, suppressOutput = o.insertFlagMetadata(s, outputTgt, ctrl)
+	var flagMetadata *FlagMetadata
+	s, flagMetadata, suppressOutput = o.insertFlagMetadata(s, outputTgt, ctrl, nil, false)
 	if checkSuppressOnly {
 		s = origString // use non-pfx string *but* return suppressOutput result
 	}
-	return s, suppressOutput
+	return s, flagMetadata, suppressOutput
 }
 
 // writeOutput basically sends the output to the io.Writer for the given
@@ -1972,9 +2011,15 @@ func (o *LvlOutput) stringOutput(s string, dying bool, exitVal int, detErrs ...D
 			logfileStackTrace = ""
 		}
 	}
-
-	outputSkipMask := 0
-	skipNativePfx := false
+	// Allow any plugin formatter to independently format only one type of
+	// output if desired (screen only or log only), or both.  From here on we
+	// start independently tracking the screen and logfile output details
+	screenStr := s
+	logfileStr := s
+	screenNoOutputMask := 0
+	logfileNoOutputMask := 0
+	screenSkipNativePfx := false
+	logfileSkipNativePfx := false
 	if formatter != nil {
 		// If the client has registered a formatting interface method then
 		// lets give it a spin, may adjust the output or suppress it alltogether
@@ -1988,20 +2033,39 @@ func (o *LvlOutput) stringOutput(s string, dying bool, exitVal int, detErrs ...D
 		if detErr != nil {
 			code = Code(detErr)
 		}
-		s, outputSkipMask, skipNativePfx = formatter.FormatMessage(s, level, code, stackStr, dying)
+		applyMask := 0
+		noOutputMask := 0
+		skipNativePfx := false
+		var resultStr string
+		// Cheat a little and grab detailed output flags metadata for formatter,
+		// note that it will include the pid, level and date info automatically
+		flags := Llongfile | Llongfunc
+		_, flagMetadata, _ := o.insertFlagMetadata(s, forScreen, AlwaysInsert, &flags, true)
+		resultStr, applyMask, noOutputMask, skipNativePfx = formatter.FormatMessage(s, level, code, stackStr, dying, *flagMetadata)
+		// Based on formatter results set up screen and logfile output/controls
+		if applyMask&forScreen != 0 {
+			screenNoOutputMask = noOutputMask
+			screenSkipNativePfx = skipNativePfx
+			screenStr = resultStr
+		}
+		if applyMask&forLogfile != 0 {
+			logfileNoOutputMask = noOutputMask
+			logfileSkipNativePfx = skipNativePfx
+			logfileStr = resultStr
+		}
 	}
 
 	// Lets see if screen (here) or logfile (below) output is active:
-	if level >= safeScreenThreshold && level != LevelDiscard && outputSkipMask&forScreen == 0 {
+	if level >= safeScreenThreshold && level != LevelDiscard && screenNoOutputMask&forScreen == 0 {
 		// Screen output active based on output levels (and formatters, if any)
-		pfxScreenStr, suppressOutput := o.doPrefixing(s, forScreen, smartInsert, detErr, skipNativePfx)
+		pfxScreenStr, _, suppressOutput := o.doPrefixing(screenStr, forScreen, smartInsert, detErr, screenSkipNativePfx)
 
 		// Note that suppressOutput is for suppressing trace/debug output so
 		// only selected/desired packages have debug output dumped (currently)
 		if !suppressOutput {
 			pfxStackTrace := ""
 			if screenStackTrace != "" {
-				pfxStackTrace, _ = o.doPrefixing(screenStackTrace, forScreen, smartInsert, detErr, skipNativePfx)
+				pfxStackTrace, _, _ = o.doPrefixing(screenStackTrace, forScreen, smartInsert, detErr, screenSkipNativePfx)
 			}
 			screenLength, err = o.writeOutput(pfxScreenStr, forScreen, dying, exitVal, pfxStackTrace)
 			if err != nil {
@@ -2011,17 +2075,15 @@ func (o *LvlOutput) stringOutput(s string, dying bool, exitVal int, detErrs ...D
 	}
 
 	// Print to the log file writer next (if needed):
-	if level >= safeLogThreshold && level != LevelDiscard && outputSkipMask&forLogfile == 0 {
-		pfxLogfileStr, suppressOutput := o.doPrefixing(s, forLogfile, smartInsert, detErr, skipNativePfx)
-		if skipNativePfx {
-			pfxLogfileStr = s
-		}
+	if level >= safeLogThreshold && level != LevelDiscard && logfileNoOutputMask&forLogfile == 0 {
+		pfxLogfileStr, _, suppressOutput := o.doPrefixing(logfileStr, forLogfile, smartInsert, detErr, logfileSkipNativePfx)
+
 		// Note that suppressOutput is for suppressing trace/debug output so
 		// only selected/desired packages have debug output dumped (currently)
 		if !suppressOutput {
 			pfxStackTrace := ""
 			if logfileStackTrace != "" {
-				pfxStackTrace, _ = o.doPrefixing(logfileStackTrace, forLogfile, smartInsert, detErr, skipNativePfx)
+				pfxStackTrace, _, _ = o.doPrefixing(logfileStackTrace, forLogfile, smartInsert, detErr, logfileSkipNativePfx)
 			}
 			logfileLength, err = o.writeOutput(pfxLogfileStr, forLogfile, dying, exitVal, pfxStackTrace)
 			if err != nil {

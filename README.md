@@ -587,32 +587,53 @@ case.  Here's how one might add this in:
     type mungeOutput struct{}
 
     // FormatMessage takes the following params:
-    // - msg (string): The raw message coming from the clients call (eg: "out.Println(msg)")
-    // - outLevel (Level): This is the output level (out.LevelTrace, out.LevelDebug, etc), one
-    //   can get a text representation via 'fmt.Sprintf("%s", outLevel)' if needed (eg: "TRACE")
-    // - code (int): An error code, defaults to the 'out' pkg default if err codes not in use (100)
-    // - stack (string): If the Issue/Error/Fatal level then the "best" stack trace available is
-    //     passed in (prefixed with "\nStack Trace: <stack>").  Normally don't use this since the
-    //     built-in stuff will "smart" add it based on if stack traces are active or not to the
-    //     given output target.  However, here it is if you need it.
-    // - dying (bool): Will be true if this is a terminal situation, IssueExit(), ErrorExit() or
-    //     Fatal() has been called... as this may effect what you do or return (see example above)
-    func (f mungeOutput) FormatMessage(msg string, outLevel Level, code int, stack string, dying bool) (string, int, bool) {
+    //  msg (string): The raw message coming from the clients call (eg: "out.Println(msg)")
+    //  outLevel (Level): This is the output level (out.LevelTrace, out.LevelDebug, etc), one
+    //      can get a text representation via 'fmt.Sprintf("%s", outLevel)' if needed (eg: "TRACE")
+    //  code (int): An error code, defaults to the 'out' pkg default if err codes not in use (100)
+    //  stack (string): If the Issue/Error/Fatal level then the "best" stack trace available is
+    //      passed in (prefixed with "\nStack Trace: <stack>").  Normally don't use this since the
+    //      built-in stuff will "smart" add it based on if stack traces are active or not to the
+    //      given output target.  However, here it is if you need it.
+    //  dying (bool): Will be true if this is a terminal situation, IssueExit(), ErrorExit() or
+    //      Fatal() has been called... as this may effect what you do or return (see example above)
+    //  flagMetadata (FlagMetadata): contains "long" metadata so one can use any metadata desired
+    //      such as the timestamp, filename, package name, line #, etc
+    // The routine returns the message to print and "control" details:
+    //  string: the "formatted" message to print (if printing is active)
+    //  int: "applyMask" indicates to apply formatting result to both, or just screen or logfile,
+    //      eg: format log data as JSON|YAML yet use standard 'out' pkg formatting for screen msgs
+    //  int: "suppressOutputMask" only impacts applyMask targets, can totally suppress output for
+    //      one of the targets, ie: if applyMask is out.ForBoth but one only wants formatted output
+    //      to go to the logfile and want no screen output at all, then suppress out.ForScreen
+    //  bool: "suppressNativePrefixing" says to drop all built-in flags meta-data prefixing as
+    //      well as all "Error: " or other prefixing that will be done for various output levels
+    func (f mungeOutput) FormatMessage(msg string, outLevel Level, code int, stack string, dying bool, mdata FlagMetadata) (string, int, int, bool) {
         // Lets add "[fun fun fun]" to the end of all our messages:
         msg = fmt.Sprintf("%s [fun fun fun]", msg)
 
-        // One can suppress out.ForBoth, out.ForLogfile, out.ForScreen but I
-        // won't suppress any output, I'm just munging the message a little:
+        // Cause the formatted messages only apply to the screen or the logfile
+        // output stream (or to both).  This allows one to, say, format the log
+        // as JSON while still getting standard 'out' pkg formatting for screen.
+        // Here we'll apply this formatting to both the screen and the logfile:
+        applyMask := out.ForBoth
+
+        // Based on applyMask above one can further complete suppress output
+        // for any stream we are targeting formatted output for... so we could
+        // suppress all output (formatted & builtin) using out.ForScreen for
+        // example and no screen output at all would happen (out.ForLogfile and
+        // out.ForBoth are also available).  We won't suppress any output:
         suppressOutputMask := 0
 
-        // I will not suppress any native 'out' pkg formatting so I'll still
-        // get my 'Error: ' prefix (if this was an error) and I'll still get
-        // any flags meta-data added to my msg, same as would have happened
-        // if a formatter wasn't used and a msg came through
+        // Next one could suppress native 'out' pkg prefixing of messages such
+        // as with flags meta-data (timestamp, log level, pid, pkg/file/line#)
+        // (this is useful if our formatted string uses the given/passed flag
+        // metadata to do it's own prefixing or puts that into JSON/etc).  For
+        // this little test routine we will let 'out' do it's prefixing:
         suppressNativePrefixing := false
 
         // That's it... return the msg to use and if anything should be suppressed
-        return msg, suppressOutputMask, suppressNativePrefixing
+        return msg, applyMask, suppressOutputMask, suppressNativePrefixing
     }
 
     func main () {
@@ -825,7 +846,7 @@ screen or log file output flags to add more meta-data for troubleshooting:
  * PKG_OUT_LOGFILE_FLAGS and PKG_OUT_SCREEN_FLAGS env are used to dynamically
    tweak the screen or log "flags". This can be useful typically for adding in
    some flags for the screen output when debugging to see file/line#/function
-   details inline withoutput (whatever flags you want, comma separated):
+   details inline with output (whatever flags you want, comma separated):
 ```text
    Predefined "group" settings, "debug" recommended really (LEVEL = output lvl):
 
