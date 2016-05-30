@@ -36,7 +36,7 @@ type logOnlyFormatMsg struct{}
 
 // FormatMessage in this context is to test the formatting "feature" of
 // the 'out' package.  In this case we're suppressing all screen output
-func (f killScreenOut) FormatMessage(msg string, outLevel Level, code int, stack string, dying bool, mdata FlagMetadata) (string, int, int, bool) {
+func (f killScreenOut) FormatMessage(msg string, outLevel Level, code int, dying bool, mdata FlagMetadata) (string, int, int, bool) {
 	applyMask := ForBoth
 	suppressOutputMask := ForScreen
 	suppressNativePrefixing := false
@@ -45,7 +45,7 @@ func (f killScreenOut) FormatMessage(msg string, outLevel Level, code int, stack
 
 // FormatMessage in this context is to test the formatting "feature" of
 // the 'out' package to see if it will suppress the native prefixing
-func (f replaceMsg) FormatMessage(msg string, outLevel Level, code int, stack string, dying bool, mdata FlagMetadata) (string, int, int, bool) {
+func (f replaceMsg) FormatMessage(msg string, outLevel Level, code int, dying bool, mdata FlagMetadata) (string, int, int, bool) {
 	msg = "Replacement message, joy joy joy"
 	applyMask := ForBoth
 	suppressOutputMask := ForLogfile
@@ -56,7 +56,7 @@ func (f replaceMsg) FormatMessage(msg string, outLevel Level, code int, stack st
 // FormatMessage in this context is to test the formatting "feature" of
 // the 'out' package to format only the logging side of the messaging while
 // the screen side prints in standard format
-func (f logOnlyFormatMsg) FormatMessage(msg string, outLevel Level, code int, stack string, dying bool, mdata FlagMetadata) (string, int, int, bool) {
+func (f logOnlyFormatMsg) FormatMessage(msg string, outLevel Level, code int, dying bool, mdata FlagMetadata) (string, int, int, bool) {
 	msg = fmt.Sprintf("Formatted!: \"%s\", metadata:\n\"%+v\"\n", msg, mdata)
 	applyMask := ForLogfile
 	suppressOutputMask := 0
@@ -66,7 +66,7 @@ func (f logOnlyFormatMsg) FormatMessage(msg string, outLevel Level, code int, st
 
 // FormatMessage in this context is to test the formatting "feature" of
 // the 'out' package.
-func (f detectDying) FormatMessage(msg string, outLevel Level, code int, stack string, dying bool, mdata FlagMetadata) (string, int, int, bool) {
+func (f detectDying) FormatMessage(msg string, outLevel Level, code int, dying bool, mdata FlagMetadata) (string, int, int, bool) {
 	if dying {
 		msg = fmt.Sprintf("Looks like we are dying [DYING #%d]", code)
 	}

@@ -97,14 +97,13 @@
 //
 // Note: logfile format defaults to: <pid> <LEVEL> <date/time> <shortfile/line#> [Level: ]msg
 //
-// Aside: for CLI tool options I like "[-d | --debug]" and "[-v | --verbose]"
-// to control tool output verbosity, ie: "-dv" (both) is the "output everything"
-// mode via the Trace level, just "-d" is the Debug level and all levels below,
+// Aside: for CLI tool options I like "[-D|--debug]" and "[-v|--verbose]"
+// to control tool output verbosity, ie: "-Dv" (both) is the "output everything"
+// mode via the Trace level, just "-D" is the Debug level and all levels below,
 // only "-v" sets the Verbose level and all levels below and Info/Print is the
-// default devel with none of those options.  Use of [-t | --terse ] maps to
-// the Issue and below levels (or whatever you like)... and perhaps "-tv" could
-// map to the Note level if you wanted to go that route.  I like spf13's pkgs
-// like viper/cobra for via CLI, env, config file mgmt, etc.
+// default level with none of those options.
+//
+// Quick Plug: I like spf13's viper&cobra pkgs for CLI and config file mgmt
 package out
 
 import (
@@ -254,6 +253,7 @@ type FlagMetadata struct {
 	LineNo int        `json:"lineno,omitempty"`
 	Level  string     `json:"level,omitempty"`
 	PID    int        `json:"pid,omitempty"`
+	Stack  string     `json:"stack,omitempty"`
 }
 
 var (
@@ -629,9 +629,10 @@ func Flags(level Level, outputTgt int) int {
 }
 
 // SetFlags sets the screen and/or logfile output flags (Ldate, Ltime, .. above)
-// Note: Right now this sets *every* levels log flags to given value, and one
-// can give it out.ForScreen, out.ForLogfile or both or'd together although
-// usually one would want to give just one to adjust (screen or logfile)
+// Note: This can set flags for a specific log level or for all log levels if
+// one uses out.LevelAll for the 1st arg, the 2nd arg is the flags to set
+// and the 3rd is what to set them on (out.ForScreen, out.ForLogfile, or
+// out.ForBoth)
 func SetFlags(level Level, flags int, outputTgt int) {
 	for _, o := range outputters {
 		o.mu.Lock()
@@ -1680,13 +1681,20 @@ func determineFlags(flagStr string) int {
 //	ignoreEnv (bool): ignore any env overrides/filters (eg: formatter wants all)
 // Returns the update msg string, any flag metadata available and if the output
 // should be suppressed (such as if debug scope doesn't include this module)
-func (o *LvlOutput) insertFlagMetadata(s string, outputTgt int, ctrl int, overrideFlags *int, ignoreEnv bool) (string, *FlagMetadata, bool) {
+//eriknow
+func (o *LvlOutput) insertFlagMetadata(s string, outputTgt int, ctrl int, overrideFlags *int, ignoreEnv bool, depth ...int) (string, *FlagMetadata, bool) {
 	now := time.Now() // do this before Caller below, can take some time
 	var file, funcName string
 	var line, flags int
 	var suppressOutput bool
 	var level Level
 	flagMetadata := &FlagMetadata{}
+	var callerDepth int
+	if depth != nil {
+		callerDepth = depth[0]
+	} else {
+		callerDepth = int(atomic.LoadInt32(&callDepth))
+	}
 	o.mu.RLock()
 	lvlOutLevel := o.level
 	sF := o.screenFlags
@@ -1721,7 +1729,7 @@ func (o *LvlOutput) insertFlagMetadata(s string, outputTgt int, ctrl int, overri
 		(!ignoreEnv && os.Getenv("PKG_OUT_DEBUG_SCOPE") != "") {
 		var ok bool
 		var pc uintptr
-		pc, file, line, ok = runtime.Caller(int(atomic.LoadInt32(&callDepth)))
+		pc, file, line, ok = runtime.Caller(callerDepth)
 		if !ok {
 			file = "???"
 			line = 0
@@ -2040,9 +2048,12 @@ func (o *LvlOutput) stringOutput(s string, dying bool, exitVal int, detErrs ...D
 		// Cheat a little and grab detailed output flags metadata for formatter,
 		// note that it will include the pid, level and date info automatically
 		flags := Llongfile | Llongfunc
-		_, flagMetadata, _ := o.insertFlagMetadata(s, forScreen, AlwaysInsert, &flags, true)
-		resultStr, applyMask, noOutputMask, skipNativePfx = formatter.FormatMessage(s, level, code, stackStr, dying, *flagMetadata)
-		// Based on formatter results set up screen and logfile output/controls
+		_, flagMetadata, _ := o.insertFlagMetadata(s, forScreen, AlwaysInsert, &flags, true, 4)
+		if stackStr != "" {
+			flagMetadata.Stack = stackStr
+		}
+		resultStr, applyMask, noOutputMask, skipNativePfx = formatter.FormatMessage(s, level, code, dying, *flagMetadata)
+		// Based on formatter results set up screen and logfile output & controls
 		if applyMask&forScreen != 0 {
 			screenNoOutputMask = noOutputMask
 			screenSkipNativePfx = skipNativePfx

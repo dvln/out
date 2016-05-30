@@ -58,7 +58,7 @@ package out
 // all off, no problem, well before getting here).
 type Formatter interface {
 	// This returns the error message without the stack trace.
-	FormatMessage(msg string, outLevel Level, code int, stack string, dying bool, mdata FlagMetadata) (string, int, int, bool)
+	FormatMessage(msg string, outLevel Level, code int, dying bool, mdata FlagMetadata) (string, int, int, bool)
 }
 
 // SetFormatter sets a formatter against the output package so that output
