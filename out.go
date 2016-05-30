@@ -1681,7 +1681,6 @@ func determineFlags(flagStr string) int {
 //	ignoreEnv (bool): ignore any env overrides/filters (eg: formatter wants all)
 // Returns the update msg string, any flag metadata available and if the output
 // should be suppressed (such as if debug scope doesn't include this module)
-//eriknow
 func (o *LvlOutput) insertFlagMetadata(s string, outputTgt int, ctrl int, overrideFlags *int, ignoreEnv bool, depth ...int) (string, *FlagMetadata, bool) {
 	now := time.Now() // do this before Caller below, can take some time
 	var file, funcName string
