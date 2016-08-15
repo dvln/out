@@ -19,15 +19,19 @@ package out
 // desired or push info elsewhere and suppress output.  Formatter fires once
 // on output without any flags applied (but prefixes can have been applied),
 // the following comes into a formatter:
-// - msg: this is the raw message before markup (can have basic prefixes on msg)
-// - level: log level (Trace, Debug, Verbose, Info/Print, Note, Issue, Error, Fatal)
-// - code: msg or error code (if available, if not a default setting)
-// - stack: stack trace if one is available
-// - dying: boolean True if fatal situation (only Issue/Error/Fatal levels)
+//	msg: this is the raw message before markup (can have basic prefixes on msg)
+//	level: log level (Trace, Debug, Verbose, Info/Print, Note, Issue, Error, Fatal)
+//	code: msg or error code (if available, if not a default setting)
+//	stack: stack trace if one is available
+//	dying: boolean true if fatal situation (only Issue/Error/Fatal levels)
+//	mdata: output metadata like time, path, file, func,line#,loglevel,pid,stack
+//	       so available for formatted messages if desired (eg: JSON formatted)
 // The return data is essentially:
-// - msg (string): the update message or just the passed in msg if no updates
-// - supressOut (int): 0 if not suppressing any output otherwise, if set, one
-// - supressNativePrefixing (bool): timestamps and prefixes are still applied
+//	msg (string): the update message or just the passed in msg if no updates
+//	applyMask (int): which output stream will the returned message be used for:
+//	                 ForLogfile, ForScreen, ForBoth or 0 (meaning neither)
+//	supressOut (int): 0 if not suppressing any output otherwise, if set, one
+//	supressNativePrefixing (bool): timestamps and prefixes are still applied
 // to the result of a Formatter unless this is set to true, then not applied
 // would set it to ForScreen, ForLogfile or ForBoth if one wishes to forcibly
 // suppress the output to those targets (eg: maybe you stored the error
