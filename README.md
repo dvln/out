@@ -415,8 +415,8 @@ them if you prefer, see the SetPrefix() method).
         "github.com/dvln/out"
     )
     ...
-    // Note that out.Lstdflags is out.Ldate|out.Ltime (date/time), augment it:
-	out.SetFlag(LevelDebug, out.Lstdflags|out.Lshortfile, ForScreen)
+    // Note that out.LstdFlags is out.Ldate|out.Ltime (date/time), augment it:
+	out.SetFlags(LevelDebug, out.LstdFlags|out.Lshortfile, ForScreen)
     ...
     // Set screen output so the 1st level of debugging is shown now:
     out.SetThreshold(out.LevelDebug, out.ForScreen)
@@ -427,6 +427,22 @@ them if you prefer, see the SetPrefix() method).
 	out.Debug("So I think you should\nuse this system\n")
 ```
 
+### Prefix print/info level output with date and time (with milliseconds)
+
+```go
+    import (
+        "github.com/dvln/out"
+    )
+    ...
+    // Note that out.LstdFlags is out.Ldate|out.Ltime (date/time), augment it:
+	out.SetFlags(LevelInfo, out.LstdFlags|out.Lmicroseconds, ForScreen)
+    ...
+    out.Print("Successful test of: ")
+    systemx := grabTestSystem()
+    out.Print("%s\n", systemx)
+	out.Println("Should be smart, ie: put one timestamp in front of the line")
+```
+
 ### Adding in long function names also for screen debug level output:
 
 ```go
@@ -434,8 +450,8 @@ them if you prefer, see the SetPrefix() method).
         "github.com/dvln/out"
     )
     ...
-    // Again, out.Lstdflags is the same as out.Ldate|out.Ltime (date/time)
-    out.SetFlag(LevelDebug, out.Lstdflags|out.Lshortfile|out.Llongfunc, ForScreen)
+    // Again, out.LstdFlags is the same as out.Ldate|out.Ltime (date/time)
+    out.SetFlags(LevelDebug, out.LstdFlags|out.Lshortfile|out.Llongfunc, ForScreen)
     ...
     out.SetThreshold(out.LevelDebug, out.ForScreen)
     ...
@@ -484,10 +500,10 @@ output exactly) into a buffer:
 
     // Lets match the default screen output stream flags setting.  We know
     // the output prefixes match by default so we won't change those, just
-    // adjust the flag settings (note: out.Lstdflags = out.Ldate|out.Ltime):
-    out.SetFlag(out.LevelAll, 0, out.ForLogfile) // clear all flag settings
-    out.SetFlag(out.LevelTrace, out.Lstdflags, out.ForLogfile)
-    out.SetFlag(out.LevelDebug, out.Lstdflags, out.ForLogfile)
+    // adjust the flag settings (note: out.LstdFlags = out.Ldate|out.Ltime):
+    out.SetFlags(out.LevelAll, 0, out.ForLogfile) // clear all flag settings
+    out.SetFlags(out.LevelTrace, out.LstdFlags, out.ForLogfile)
+    out.SetFlags(out.LevelDebug, out.LstdFlags, out.ForLogfile)
     ...
     // Note: normally we wouldn't do the above to match the screen settings
     // as the default screen settings might have been changed by the client.
@@ -495,7 +511,7 @@ output exactly) into a buffer:
     // customizing an individual output stream and it's various levels.
     // To match flags we might instead do this:
     for lvl := out.LevelTrace; lvl <= out.LevelFatal; lvl++ {
-        out.SetFlag(lvl, out.Flags(lvl, out.ForScreen), out.ForLogfile)
+        out.SetFlags(lvl, out.Flags(lvl, out.ForScreen), out.ForLogfile)
     }
     ...
     // Now match the screens output threshold (typically Print/Info level):
