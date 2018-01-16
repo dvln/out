@@ -12,7 +12,7 @@ greatly facilitates problem reproduction, activity monitoring and
 troubleshooting for the tool as well as making testing of the tool
 quite a bit easier (eg: easily send all screen output into a buffer).
 
-The package is concurrent goroutine safe with built-in locking of the
+The package is concurrent/goroutine safe with built-in locking of the
 output streams and such... although the cost of that locking can be a
 slight speed drop so keep that in mind if your tool is shooting for extreme
 performance.  A version of this package has been used in a production
@@ -954,23 +954,44 @@ screen or log file output flags to add more meta-data for troubleshooting:
    to receive logging data at the right output thresholds and such.
 
 # Current status
-This is now stabilizing.  Currently 'out' is at a "v0.8.0" level (semantic
-versioning v2).  Not fully stable until v1.0.0 so keep that in mind and
-fork it if you're using it (or vendor it).  Expect v1.0.0 around early
-2016 after I get some more use and input.  Feel free to fork, send pull
-requests or file issues.
+This has been fairly stable for about two years now.  It is used internally
+at a company I have worked at for a couple of years within a number of active
+daemons and tools in use there.  Feel free to fork, send pull requests or
+file issues.
 
-Note: I've tried to use mutexes and atomic operations to protect the data
-so it can be used concurrently but take that with a grain of salt as it's
-not heavily tested in this area yet (yes, it passes race testing).
+The current version is v0.9.0.  It is stable but I expect some changes
+to come that will likely break API's with changes focused around the
+detailed error part of the package (the rest likely will not change
+near term).  For detailed errors, I'm thinking a sub-dir that is a
+separate package, effectivley (one would have to import it to use it,
+its use would remain totally optional).  Beyond that probably some
+API tweaks to things like 'NewErr()' and 'NewErrf()' so that NewErr
+more closely aligns with NewErrf in how the error code parameter is
+handled (up-front, non-optional, allow 0 if code is not desired
+when using the package, will not show the code in that case).
+Anyhow, once these detailed error changes are done it'll likely
+get shifted to v1.0.0 at that time.  Should be stable.
 
-I wrote this for use in [dvln](http://github.com/dvln/dvln). Yeah, doesn't really
-exist yet but we shall see if I can change that (but one can see this package
-in use in that and packages it depends upon).  It's targeted towards nested
-multi-pkg multi-scm development line and workspace management (not necessarily
-for Go workspaces but could be used for that as well)... what could go wrong? ;)
+As above, this package uses mutexes and atomic operations to protect
+the data so it can be used concurrently but, as with any concurrent
+activities, some scenarios might have been missed!  This package has
+been in use for 2 years now and has been stable (far more "stable"
+than our "stable genius" leader, I believe).  Regardless, YMMV so
+give it a try before adopting fully.
 
-Thanks again to the Go authors and various others like spf13, Dropbox and countless
-others authors with open code that I have gleaned ideas and code from to generate this
-package.
+I wrote this for use in [dvln](http://github.com/dvln/dvln) originally,
+but ended up getting a contract before I could wrap that up.  Anyhow,
+I've used it internally on that contract for a number of tools and
+daemons successfully and continue to try and keep this version safe
+and stable.
+
+Thanks again to the Go authors and various others like spf13, Dropbox
+and countless others authors with open code that I have gleaned ideas
+and code from to generate this package.
+
+Note that there are many of powerful log packages out there so if you
+have no need for fancy independent dual stream control (along with some
+of the other features) then using a key/val based logger can be very
+powerful.  See loggers such as that from gokit and error packages like
+the one from Dave Cheney or Dropbox, amongst others.
 
